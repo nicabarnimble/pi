@@ -590,7 +590,7 @@ A task can own child tasks, created with `ownership: { kind: "task", taskId }`, 
 
 ```typescript
 pay: async (task, runtime, context) => {
-	await runtime.commit(async (tx) => {
+	await runtime.commitRun(async (tx) => {
 		const payments = [];
 		for (const card of task.input.cards) {
 			payments.push(await tx.createTask(Payment, { card }, { ownership: { kind: "task", taskId: task.id } }));

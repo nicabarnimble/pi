@@ -272,14 +272,14 @@ it("types submissions, task waits, compaction, and tasks erased into extensions"
 			plan: async (task, runtime, context) => {
 				expectTypeOf(task.state.checkpoint.steps).toEqualTypeOf<number>();
 				expectTypeOf(task.input.steps).toEqualTypeOf<number>();
-				await runtime.commit(() => ({ status: "running", checkpoint: { phase: "run", step: 0 } }), context);
+				await runtime.commitRun(() => ({ status: "running", checkpoint: { phase: "run", step: 0 } }), context);
 			},
 			run: async (task, runtime, context) => {
 				expectTypeOf(task.state.checkpoint.step).toEqualTypeOf<number>();
 				await runtime.hooks.each("beforeStep", (handler) => {
 					expectTypeOf(handler).toEqualTypeOf<Hooks["beforeStep"]>();
 				});
-				await runtime.commit(
+				await runtime.commitRun(
 					() => ({ status: "terminal", outcome: { status: "completed", result: { ran: 1 } } }),
 					context,
 				);

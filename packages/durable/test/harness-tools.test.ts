@@ -827,7 +827,7 @@ describe("tool execution api", () => {
 			initial: () => ({ phase: "run" }),
 			phases: {
 				run: async (task, runtime, callContext) => {
-					await runtime.commit(
+					await runtime.commitRun(
 						() => ({ status: "terminal", outcome: { status: "completed", result: task.input.n * 2 } }),
 						callContext,
 					);

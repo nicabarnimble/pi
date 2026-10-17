@@ -30,13 +30,13 @@ const Work = defineTask<null, { phase: "work" }, null>({
 	initial: () => ({ phase: "work" }),
 	phases: {
 		work: async (_task, runtime, ctx) =>
-			runtime.commit(async (tx) => {
+			runtime.commitRun(async (tx) => {
 				(await tx.doc(UsageDoc, runtime.conversationId)).tools.bench = { input: 1 } as never;
 				return { status: "terminal", outcome: { status: "completed", result: null } };
 			}, ctx),
 	},
 	abort: async (_task, runtime, ctx) =>
-		runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), ctx),
+		runtime.commitAbort(() => ({ status: "terminal", outcome: { status: "aborted" } }), ctx),
 });
 
 async function run(conversations: number, documentRetentionMs: number) {

@@ -18,7 +18,7 @@ import { defineTask } from "../tasks.ts";
 import type {
 	ConversationId,
 	EntryId,
-	NextTaskState,
+	RunNextTaskState,
 	SubmissionId,
 	TaskId,
 	TaskOutcome,
@@ -95,7 +95,7 @@ export type GenerationCheckpoint =
 export type GenerationResult = { entryId: EntryId };
 
 type Runtime = TaskRuntime<GenerationInput, GenerationCheckpoint, GenerationResult, GenerationHooks>;
-type Next = NextTaskState<GenerationCheckpoint, GenerationResult>;
+type Next = RunNextTaskState<GenerationCheckpoint, GenerationResult>;
 
 /** What classification needs from the request that produced a message. */
 type Request = {
@@ -167,14 +167,14 @@ export const GenerationTask = defineTask<GenerationInput, GenerationCheckpoint, 
 					: undefined;
 			if (threshold === "blocking") {
 				// Compact first and prepare again; the transcript is unchanged until the compaction appends.
-				await runtime.commit(async (tx): Promise<Next> => {
+				await runtime.commitRun(async (tx): Promise<Next> => {
 					const child = await createCompaction(tx, conversationId, { reason: "threshold" }, runtime.taskId);
 					const checkpoint = { phase: "prepare", attempt, compacted: child, threshold: true } as const;
 					return { status: "waiting", checkpoint, on: [child], policy: "allSettled" };
 				}, context);
 				return;
 			}
-			await runtime.commit(async (tx) => {
+			await runtime.commitRun(async (tx) => {
 				let cutoff = (await tx.scanEntries({ conversationId }, 1)).items[0]?.id;
 				for (const entry of entries) cutoff = (await tx.appendEntry(SystemEntry, conversationId, entry)).id;
 				if (cutoff === undefined) throw new Error(`Conversation ${conversationId} has no entries to send`);
@@ -196,7 +196,7 @@ export const GenerationTask = defineTask<GenerationInput, GenerationCheckpoint, 
 		request: async (task, runtime, context) => {
 			const { attempt, compacted, model: ref, thinkingLevel, streamOptions, cutoff } = task.state.checkpoint;
 			const conversationId = runtime.conversationId;
-			await runtime.commit(async (tx) => {
+			await runtime.commitRun(async (tx) => {
 				const live = await tx.doc(LiveDoc, conversationId);
 				await convertPartial(tx, live, conversationId);
 				live.generation = { attempt };
@@ -223,7 +223,7 @@ export const GenerationTask = defineTask<GenerationInput, GenerationCheckpoint, 
 		retry: async (task, runtime, context) => {
 			const { attempt, compacted, until } = task.state.checkpoint;
 			await runtime.sleep(until, context);
-			await runtime.commit(async (tx) => {
+			await runtime.commitRun(async (tx) => {
 				(await tx.doc(LiveDoc, runtime.conversationId)).generation = { attempt: attempt + 1 };
 				const checkpoint: GenerationCheckpoint = {
 					phase: "prepare",
@@ -247,7 +247,7 @@ export const GenerationTask = defineTask<GenerationInput, GenerationCheckpoint, 
 			const [next, ...rest] = pending;
 			if (next === undefined) return finishToolRound(runtime, assistant, tools, context);
 			// Sequential round: start the next call and wait for it.
-			await runtime.commit(async (tx): Promise<Next> => {
+			await runtime.commitRun(async (tx): Promise<Next> => {
 				const live = await tx.doc(LiveDoc, runtime.conversationId);
 				const taskId = await createToolTask(tx, runtime, assistant, next);
 				const slot = live.tools?.find((slot) => slot.callId === next && slot.taskId === undefined);
@@ -280,7 +280,7 @@ export const GenerationTask = defineTask<GenerationInput, GenerationCheckpoint, 
 			checkpoint.phase === "tools"
 				? await readCalls(runtime, checkpoint.assistant, checkpoint.pending, context)
 				: [];
-		await runtime.commit(async (tx) => {
+		await runtime.commitAbort(async (tx) => {
 			const live = await tx.doc(LiveDoc, conversationId);
 			await convertPartial(tx, live, conversationId);
 			for (const call of unstarted) {
@@ -353,7 +353,7 @@ function compactionFailure(outcome: Exclude<TaskOutcome<CompactionResult>, { sta
 
 /** Settle the run's inputs `unanswered` with `model_error` and fail with `text`. */
 async function failModelError(runtime: Runtime, text: string, context: Context): Promise<void> {
-	await runtime.commit(async (tx) => {
+	await runtime.commitRun(async (tx) => {
 		const live = await tx.doc(LiveDoc, runtime.conversationId);
 		endRun(tx, live, runtime.taskId, { status: "unanswered", reason: "model_error", detail: text });
 		return {
@@ -367,7 +367,7 @@ async function failModelError(runtime: Runtime, text: string, context: Context):
 async function failNoModel(runtime: Runtime, ref: ModelRef | undefined, context: Context): Promise<void> {
 	const message =
 		ref === undefined ? "No model is configured" : `Model ${ref.provider}/${ref.modelId} is not available`;
-	await runtime.commit(async (tx) => {
+	await runtime.commitRun(async (tx) => {
 		const live = await tx.doc(LiveDoc, runtime.conversationId);
 		endRun(tx, live, runtime.taskId, { status: "unanswered", reason: "no_model" });
 		return { status: "terminal", outcome: { status: "failed", error: { message, detail: { reason: "no_model" } } } };
@@ -411,7 +411,7 @@ async function streamResponse(
 		inFlight = (async () => {
 			// Copy synchronously: the provider keeps mutating its partial.
 			const message = copyJson(partial, { omitUndefinedProperties: true });
-			await runtime.commit(async (tx) => {
+			await runtime.commitRun(async (tx) => {
 				const live = await tx.doc(LiveDoc, runtime.conversationId);
 				live.generation ??= { attempt };
 				assignJson(live.generation as Draft<Record<string, JsonValue>>, "message", message);
@@ -461,7 +461,7 @@ async function classify(
 			runtime.now() + (handle.pollAfterMs ?? DEFAULT_POLL_AFTER_MS),
 			request.pollAt === undefined ? Number.NEGATIVE_INFINITY : request.pollAt + 1,
 		);
-		await runtime.commit(async (tx) => {
+		await runtime.commitRun(async (tx) => {
 			(await tx.doc(LiveDoc, conversationId)).generation = { attempt, deferred: { pollAt } };
 			const checkpoint = {
 				phase: "poll",
@@ -492,7 +492,7 @@ async function classify(
 		const view = await runtime.context(conversationId, context, { at: cutoff });
 		if (selectCut(view, compaction.keepRecentTokens) !== undefined) {
 			const text = message.errorMessage ?? "Context overflow";
-			await runtime.commit(async (tx): Promise<Next> => {
+			await runtime.commitRun(async (tx): Promise<Next> => {
 				const live = await tx.doc(LiveDoc, conversationId);
 				await appendAssistant(tx, conversationId, message);
 				delete live.generation;
@@ -512,7 +512,7 @@ async function classify(
 		policy.enabled &&
 		attempt <= policy.maxRetries;
 	const until = retry ? runtime.now() + retryDelayMs(policy, attempt) : 0;
-	await runtime.commit(async (tx): Promise<Next> => {
+	await runtime.commitRun(async (tx): Promise<Next> => {
 		const live = await tx.doc(LiveDoc, conversationId);
 		await appendAssistant(tx, conversationId, message);
 		if (retry) {
@@ -546,7 +546,7 @@ async function answer(runtime: Runtime, message: AssistantMessage, context: Cont
 		continuation = (await hook(message, runtime, context))?.continue;
 	});
 	const conversationId = runtime.conversationId;
-	await runtime.commit(async (tx): Promise<Next> => {
+	await runtime.commitRun(async (tx): Promise<Next> => {
 		// Queue modes are read on the Session line, when the boundary is decided.
 		const boundary = await prepareBoundary(tx, conversationId, runtime.settings);
 		const live = await tx.doc(LiveDoc, conversationId);
@@ -590,7 +590,7 @@ async function startToolRound(
 			(call) =>
 				offered.has(call.name) && tools.find((tool) => tool.name === call.name)?.executionMode === "sequential",
 		);
-	await runtime.commit(async (tx): Promise<Next> => {
+	await runtime.commitRun(async (tx): Promise<Next> => {
 		const live = await tx.doc(LiveDoc, conversationId);
 		const entry = await appendAssistant(tx, conversationId, message);
 		const slots: ToolSlot[] = [];
@@ -650,7 +650,7 @@ async function finishToolRound(
 	const added = [...controls.values()].flatMap((control) => control?.addTools ?? []);
 	// The last handoff in call order wins.
 	const handoff = [...controls.values()].findLast((control) => control?.handoff !== undefined)?.handoff;
-	await runtime.commit(async (tx): Promise<Next> => {
+	await runtime.commitRun(async (tx): Promise<Next> => {
 		const boundary = await prepareBoundary(tx, conversationId, runtime.settings);
 		if (added.length > 0) await addTools(tx, conversationId, added);
 		const live = await tx.doc(LiveDoc, conversationId);

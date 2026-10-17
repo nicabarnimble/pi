@@ -28,11 +28,11 @@ const Hold = defineTask<{ name: string }, { phase: "hold" }, null>({
 		hold: async (task, runtime, ctx) => {
 			const opened = await Promise.race([gate(task.input.name).promise.then(() => true), aborted(runtime.signal)]);
 			if (opened !== true) return;
-			await runtime.commit(() => ({ status: "terminal", outcome: { status: "completed", result: null } }), ctx);
+			await runtime.commitRun(() => ({ status: "terminal", outcome: { status: "completed", result: null } }), ctx);
 		},
 	},
 	abort: async (_task, runtime, ctx) =>
-		runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), ctx),
+		runtime.commitAbort(() => ({ status: "terminal", outcome: { status: "aborted" } }), ctx),
 });
 
 /** What `ownedTasks()` returned to each run of a `Probe`, by its name, and the runtime of its last run. */
@@ -53,11 +53,11 @@ const Probe = defineTask<{ name: string }, { phase: "look" }, null>({
 				(await runtime.ownedTasks(ctx)).map((record) => record.id),
 			);
 			await Promise.race([gate(task.input.name).promise, aborted(runtime.signal)]);
-			await runtime.commit(() => ({ status: "terminal", outcome: { status: "completed", result: null } }), ctx);
+			await runtime.commitRun(() => ({ status: "terminal", outcome: { status: "completed", result: null } }), ctx);
 		},
 	},
 	abort: async (_task, runtime, ctx) =>
-		runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), ctx),
+		runtime.commitAbort(() => ({ status: "terminal", outcome: { status: "aborted" } }), ctx),
 });
 
 const directories: string[] = [];

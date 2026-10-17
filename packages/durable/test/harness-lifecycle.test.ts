@@ -35,7 +35,7 @@ function oneStep(name: string, run: () => Promise<void> = async () => {}) {
 		phases: {
 			run: async (_task, runtime, ctx) => {
 				await run();
-				await runtime.commit(() => completed(null), ctx);
+				await runtime.commitRun(() => completed(null), ctx);
 			},
 		},
 		abort: async () => {},

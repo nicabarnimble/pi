@@ -1840,20 +1840,24 @@ Storage admission so persisted conversation-owner edges cannot become stale.
 
 The phase map is exhaustive and phase-narrowed. A handler may perform several
 commits around one effect, but each durable checkpoint is a full replacement.
-`TaskRuntime.commit()` rereads and gates the current durable task on the Session
-line before invoking its callback. It rejects when the invocation has ended, the
-Harness is closing, the task is terminal, or a run invocation's task carries an
-abort mark. Its `tx.createTask()` defaults to the task's conversation, and every
-entry it appends records the task as `byTaskId`. When the
-callback returns a state, the runtime replaces the task's state in the same
-commit, so the checkpoint or outcome is atomic with the callback's entries,
-documents, and child tasks and is type-checked against the task's checkpoint and
-result types. Returning nothing leaves the state unchanged. A terminal or
-completing state drops the memos. A `waiting` state ends the invocation even
-when its checkpoint is unchanged; it rejects when `on` names a missing task or
-closes a wait cycle (section 5.5), which no task on it could finish first, and
-an empty `on` resumes at the next scheduling pass. `pending` is never returned;
-only reconciliation and handover write it.
+`TaskRuntime.commitRun()` and `TaskRuntime.commitAbort()` reread and gate the
+current durable task on the Session line before invoking their callback. Both
+reject when the invocation has ended, the Harness is closing, or the task is
+terminal. `commitRun()` also rejects when a run invocation's task carries an
+abort mark, and its callback cannot return an `aborted` outcome. `commitAbort()`
+accepts only a terminal `aborted` outcome; an abort handler uses it. Their
+`tx.createTask()` defaults to the task's conversation, and every entry they
+append records the task as `byTaskId`. When the callback returns a state, the
+runtime replaces the task's state in the same commit, so the checkpoint or
+outcome is atomic with the callback's entries, documents, and child tasks and is
+type-checked against the task's checkpoint and result types. Returning nothing
+leaves the state unchanged. A returned `terminal` state is stored as `completing`
+while ordinary owned work is live. A terminal or completing state drops the
+memos. A `waiting` state ends the invocation even when its checkpoint is
+unchanged; it rejects when `on` names a missing task or closes a wait cycle
+(section 5.5), which no task on it could finish first, and an empty `on` resumes
+at the next scheduling pass. `pending` is never returned; only reconciliation
+and handover write it.
 
 `Tx` has no task replacement operation. A task changes only its own state,
 through its runtime. The scheduler owns reservation, reconciliation, handover,
@@ -1863,11 +1867,11 @@ stops a task with `abortTask()` and reads its result with `waitForTask()`.
 ```ts
 // Intent, effect, outcome.
 prepare: async (task, runtime, context) => {
-  await runtime.commit(() => ({ status: "running", checkpoint: { phase: "charge", key: newKey() } }), context);
+  await runtime.commitRun(() => ({ status: "running", checkpoint: { phase: "charge", key: newKey() } }), context);
 },
 charge: async (task, runtime, context) => {
   const receipt = await payments.charge(task.state.checkpoint.key); // idempotent by key
-  await runtime.commit(async (tx, current) => {
+  await runtime.commitRun(async (tx, current) => {
     const entry = await tx.appendEntry(current.conversationId, receiptEntry(receipt));
     return { status: "terminal", outcome: { status: "completed", result: { entryId: entry.id } } };
   }, context);
@@ -1875,7 +1879,7 @@ charge: async (task, runtime, context) => {
 // The abort handler decides the outcome; returning without one faults the task.
 abort: async (task, runtime, context) => {
   await payments.cancel(task.state.checkpoint);
-  await runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted", reason: "user" } }), context);
+  await runtime.commitAbort(() => ({ status: "terminal", outcome: { status: "aborted", reason: "user" } }), context);
 },
 ```
 `memo(name, candidate)` is one gated commit; `memo(name)` reads the committed

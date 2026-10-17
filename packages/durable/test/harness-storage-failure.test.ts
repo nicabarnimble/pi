@@ -33,7 +33,7 @@ const Waiting = defineTask<null, { phase: "work" }, null>({
 		},
 	},
 	abort: async (_task, runtime, abortContext) => {
-		await runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), abortContext);
+		await runtime.commitAbort(() => ({ status: "terminal", outcome: { status: "aborted" } }), abortContext);
 	},
 });
 

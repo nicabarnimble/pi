@@ -32,11 +32,11 @@ const Hold = defineTask<{ name: string }, { phase: "hold" }, null>({
 	phases: {
 		hold: async (task, runtime, ctx) => {
 			await new Promise<void>((resolve) => waiting.set(task.input.name, resolve));
-			await runtime.commit(() => ({ status: "terminal", outcome: { status: "completed", result: null } }), ctx);
+			await runtime.commitRun(() => ({ status: "terminal", outcome: { status: "completed", result: null } }), ctx);
 		},
 	},
 	abort: async (_task, runtime, ctx) =>
-		runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), ctx),
+		runtime.commitAbort(() => ({ status: "terminal", outcome: { status: "aborted" } }), ctx),
 });
 
 async function release(name: string): Promise<void> {

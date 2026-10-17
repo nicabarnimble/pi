@@ -184,7 +184,7 @@ describe("nested tool calls across a restart", () => {
 			},
 			abort: async (task, runtime, abortContext) => {
 				aborts.push(task.abortReason);
-				await runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), abortContext);
+				await runtime.commitAbort(() => ({ status: "terminal", outcome: { status: "aborted" } }), abortContext);
 			},
 		});
 		setup.registry.install(defineExtension({ name: "worker", tasks: [Worker] }));
@@ -246,7 +246,7 @@ describe("nested tool calls across a restart", () => {
 			},
 			abort: async (task, runtime, abortContext) => {
 				aborts.push(task.abortReason);
-				await runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), abortContext);
+				await runtime.commitAbort(() => ({ status: "terminal", outcome: { status: "aborted" } }), abortContext);
 			},
 		});
 		const extension = defineExtension({ name: "late", tasks: [Worker] });
@@ -312,7 +312,7 @@ describe("nested tool calls across a restart", () => {
 				},
 			},
 			abort: async (_task, runtime, abortContext) => {
-				await runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), abortContext);
+				await runtime.commitAbort(() => ({ status: "terminal", outcome: { status: "aborted" } }), abortContext);
 			},
 		});
 		const extension = defineExtension({ name: "gone", tasks: [Worker] });
@@ -636,7 +636,7 @@ describe("nested tool calls across a restart", () => {
 			},
 			abort: async (task, runtime, abortContext) => {
 				phases.push(`abort ${task.abortReason}`);
-				await runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), abortContext);
+				await runtime.commitAbort(() => ({ status: "terminal", outcome: { status: "aborted" } }), abortContext);
 			},
 		});
 		setup.registry.install(defineExtension({ name: "direct-worker", tasks: [Worker] }));
@@ -681,7 +681,7 @@ describe("nested tool calls across a restart", () => {
 				},
 			},
 			abort: async (_task, runtime, abortContext) => {
-				await runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), abortContext);
+				await runtime.commitAbort(() => ({ status: "terminal", outcome: { status: "aborted" } }), abortContext);
 			},
 		});
 		setup.registry.install(defineExtension({ name: "background", tasks: [Background] }));

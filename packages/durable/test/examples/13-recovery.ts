@@ -35,7 +35,7 @@ const Ticker = defineTask<{ to: number }, { phase: "tick"; n: number }, string>(
 			}
 			reachedTick(n);
 			// Save the outcome: the next tick, or the final result.
-			await runtime.commit(
+			await runtime.commitRun(
 				() =>
 					n === task.input.to
 						? { status: "terminal", outcome: { status: "completed", result: `counted to ${n}` } }
@@ -48,7 +48,7 @@ const Ticker = defineTask<{ to: number }, { phase: "tick"; n: number }, string>(
 		},
 	},
 	abort: async (_task, runtime, taskContext) => {
-		await runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), taskContext);
+		await runtime.commitAbort(() => ({ status: "terminal", outcome: { status: "aborted" } }), taskContext);
 	},
 });
 const registry = createRegistry();

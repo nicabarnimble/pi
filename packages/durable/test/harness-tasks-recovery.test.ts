@@ -70,7 +70,7 @@ function transferTask(service: TransferService, interrupt: { first: boolean }) {
 		phases: {
 			prepare: async (task, runtime, ctx) => {
 				await runtime.memo("requested", task.input.amount, ctx);
-				await runtime.commit(
+				await runtime.commitRun(
 					() => ({ status: "running", checkpoint: { phase: "apply", key: `transfer-${task.id}` } }),
 					ctx,
 				);
@@ -81,11 +81,11 @@ function transferTask(service: TransferService, interrupt: { first: boolean }) {
 					interrupt.first = false;
 					await aborted(runtime.signal);
 				}
-				await runtime.commit(() => completed({ receipt }), ctx);
+				await runtime.commitRun(() => completed({ receipt }), ctx);
 			},
 		},
 		abort: async (_task, runtime, ctx) => {
-			await runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), ctx);
+			await runtime.commitAbort(() => ({ status: "terminal", outcome: { status: "aborted" } }), ctx);
 		},
 	});
 }
@@ -102,8 +102,8 @@ function versioned(
 		name: "test.versioned",
 		version,
 		initial: () => ({ phase: "run" }),
-		phases: { run: (_task, runtime, ctx) => runtime.commit(() => completed(result), ctx) },
-		abort: (_task, runtime, ctx) => runtime.commit(() => abortedWith(result), ctx),
+		phases: { run: (_task, runtime, ctx) => runtime.commitRun(() => completed(result), ctx) },
+		abort: (_task, runtime, ctx) => runtime.commitAbort(() => abortedWith(result), ctx),
 		...(migrate === undefined ? {} : { migrate }),
 	});
 }
@@ -196,7 +196,7 @@ describe("task recovery", () => {
 					abortReached.resolve();
 					await aborted(runtime.signal);
 				}
-				await runtime.commit(() => abortedWith("stop"), ctx);
+				await runtime.commitAbort(() => abortedWith("stop"), ctx);
 			},
 		});
 
@@ -267,7 +267,7 @@ describe("task crash recovery", () => {
 			abort: async (_task, runtime, ctx) => {
 				log.push("abort");
 				if (options.blockAbort) await new Promise(() => {});
-				await runtime.commit(() => abortedWith("recovered"), ctx);
+				await runtime.commitAbort(() => abortedWith("recovered"), ctx);
 			},
 		});
 	}
@@ -364,7 +364,7 @@ describe("task crash recovery", () => {
 				log.push("abort");
 				reached.resolve();
 				await proceed.promise;
-				await runtime.commit(() => abortedWith("lost"), ctx);
+				await runtime.commitAbort(() => abortedWith("lost"), ctx);
 			},
 		});
 		const { harness } = await openTasks(storage, [Crash]);
@@ -617,7 +617,7 @@ describe("definition handover", () => {
 			async (_task: unknown, runtime: TaskRuntime<null, Handover, null, object>, ctx: Context) => {
 				log.push(`${label}:${phase} start`);
 				await options.gates?.[phase];
-				await runtime.commit(() => ({ status: "running", checkpoint: next }), ctx);
+				await runtime.commitRun(() => ({ status: "running", checkpoint: next }), ctx);
 				// Leave room for a wrongly dispatched successor before this invocation ends.
 				await flush();
 				options.gates?.onEnd?.();
@@ -632,12 +632,12 @@ describe("definition handover", () => {
 				b: advance("b", { phase: "c" }),
 				c: async (_task, runtime, ctx) => {
 					log.push(`${label}:c`);
-					await runtime.commit(() => completed(null), ctx);
+					await runtime.commitRun(() => completed(null), ctx);
 				},
 			},
 			abort: async (_task, runtime, ctx) => {
 				log.push(`${label}:abort`);
-				await runtime.commit(() => abortedWith(label), ctx);
+				await runtime.commitAbort(() => abortedWith(label), ctx);
 			},
 			...(options.migrate === undefined ? {} : { migrate: options.migrate }),
 		});
@@ -680,13 +680,13 @@ describe("definition handover", () => {
 						await runtime.memo("picked", label, ctx);
 						reached.resolve();
 						await gate.promise;
-						await runtime.commit(() => ({ status: "running", checkpoint: { phase: "b" } }), ctx);
+						await runtime.commitRun(() => ({ status: "running", checkpoint: { phase: "b" } }), ctx);
 					},
 					b: async (_task, runtime, ctx) => {
 						// The candidate loses to the memo the old definition stored.
 						const picked = await runtime.memo("picked", label, ctx);
 						log.push(`${label}:b ${picked}`);
-						await runtime.commit(() => completed(picked), ctx);
+						await runtime.commitRun(() => completed(picked), ctx);
 					},
 				},
 				abort: async () => {},
@@ -775,7 +775,7 @@ describe("definition handover", () => {
 				a: async (task, runtime, ctx) => {
 					oldRuntime = runtime;
 					await gate.promise;
-					await runtime.commit(() => ({ status: "running", checkpoint: { phase: "b" } }), ctx);
+					await runtime.commitRun(() => ({ status: "running", checkpoint: { phase: "b" } }), ctx);
 					// Hold the line with an unrelated commit so the handover commit queues behind it.
 					held = storage.holdCommits();
 					void harnessRef!.commit(async (tx) => {
@@ -800,7 +800,7 @@ describe("definition handover", () => {
 		await held!.entered;
 		await flush();
 		// Queued behind the handover commit while the invocation has not ended yet.
-		const late = oldRuntime!.commit(() => completed(null), context);
+		const late = oldRuntime!.commitRun(() => completed(null), context);
 		held!.release();
 		await expect(late).rejects.toThrow("invocation has ended");
 		await harness.waitForTask(id, context);

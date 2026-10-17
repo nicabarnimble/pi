@@ -122,6 +122,8 @@ export { createSession } from "./session/session.ts";
 export { MemoryStorage } from "./storage/memory.ts";
 export { defineTask } from "./tasks.ts";
 export type {
+	AbortNextTaskState,
+	AbortTaskOutcome,
 	CheckpointInfo,
 	CommitChange,
 	CommitPublication,
@@ -168,7 +170,9 @@ export type {
 	RewindableConversationDocFamilyToken,
 	RewindableConversationDocToken,
 	RewindableConversationSemantics,
+	RunNextTaskState,
 	RunningTask,
+	RunTaskOutcome,
 	ScanOrder,
 	Seq,
 	Session,

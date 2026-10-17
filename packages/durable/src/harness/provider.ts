@@ -30,7 +30,7 @@ export async function ensureProviderSessionId<I, S, R, H extends object>(
 	const existing = await runtime.snapshot(ProviderDoc, runtime.conversationId, context);
 	if (existing !== undefined) return existing.sessionId;
 	let created: string | undefined;
-	await runtime.commit(async (tx) => {
+	await runtime.commitRun(async (tx) => {
 		created = (await tx.doc(ProviderDoc, runtime.conversationId)).sessionId;
 		return undefined;
 	}, context);

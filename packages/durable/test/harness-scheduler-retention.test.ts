@@ -40,11 +40,11 @@ const Hold = defineTask<{ name: string }, { phase: "hold" }, null>({
 			runs.set(task.input.name, (runs.get(task.input.name) ?? 0) + 1);
 			const opened = await Promise.race([gate(task.input.name).promise.then(() => true), aborted(runtime.signal)]);
 			if (opened !== true) return;
-			await runtime.commit(() => ({ status: "terminal", outcome: { status: "completed", result: null } }), ctx);
+			await runtime.commitRun(() => ({ status: "terminal", outcome: { status: "completed", result: null } }), ctx);
 		},
 	},
 	abort: async (_task, runtime, ctx) =>
-		runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), ctx),
+		runtime.commitAbort(() => ({ status: "terminal", outcome: { status: "aborted" } }), ctx),
 });
 
 /** Holds until its gate opens, then creates a held task `inside.<name>` in conversation `input.into` and ends. */
@@ -56,7 +56,7 @@ const Spawner = defineTask<{ name: string; into: number }, { phase: "hold" }, nu
 		hold: async (task, runtime, ctx) => {
 			const opened = await Promise.race([gate(task.input.name).promise.then(() => true), aborted(runtime.signal)]);
 			if (opened !== true) return;
-			await runtime.commit(async (tx) => {
+			await runtime.commitRun(async (tx) => {
 				await tx.createTask(
 					Hold,
 					{ name: `inside.${task.input.name}` },
@@ -67,7 +67,7 @@ const Spawner = defineTask<{ name: string; into: number }, { phase: "hold" }, nu
 		},
 	},
 	abort: async (_task, runtime, ctx) =>
-		runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), ctx),
+		runtime.commitAbort(() => ({ status: "terminal", outcome: { status: "aborted" } }), ctx),
 });
 
 /** Rejected commits it caught. */
@@ -86,7 +86,7 @@ const Rejected = defineTask<{ into: number }, { phase: "hold" }, null>({
 			const opened = await Promise.race([gate("rejected").promise.then(() => true), aborted(runtime.signal)]);
 			if (opened !== true) return;
 			try {
-				await runtime.commit(async (tx) => {
+				await runtime.commitRun(async (tx) => {
 					await tx.createTask(
 						Hold,
 						{ name: "staged" },
@@ -102,7 +102,7 @@ const Rejected = defineTask<{ into: number }, { phase: "hold" }, null>({
 		},
 	},
 	abort: async (_task, runtime, ctx) =>
-		runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), ctx),
+		runtime.commitAbort(() => ({ status: "terminal", outcome: { status: "aborted" } }), ctx),
 });
 
 type Sizes = Record<"live" | "settled" | "edges" | "below" | "roots" | "unloaded" | "dropQueue", number>;
@@ -571,13 +571,13 @@ const Waiter = defineTask<{ on: TaskId[] }, { phase: "wait" } | { phase: "done" 
 	initial: () => ({ phase: "wait" }),
 	phases: {
 		wait: async (task, runtime, ctx) =>
-			runtime.commit(
+			runtime.commitRun(
 				() => ({ status: "waiting", checkpoint: { phase: "done" }, on: task.input.on, policy: "allSettled" }),
 				ctx,
 			),
 		done: async (_task, runtime, ctx) =>
-			runtime.commit(() => ({ status: "terminal", outcome: { status: "completed", result: null } }), ctx),
+			runtime.commitRun(() => ({ status: "terminal", outcome: { status: "completed", result: null } }), ctx),
 	},
 	abort: async (_task, runtime, ctx) =>
-		runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), ctx),
+		runtime.commitAbort(() => ({ status: "terminal", outcome: { status: "aborted" } }), ctx),
 });

@@ -206,14 +206,14 @@ function examples() {
 		phases: {
 			// Intent, effect, outcome.
 			prepare: async (_task, runtime, context) => {
-				await runtime.commit(
+				await runtime.commitRun(
 					() => ({ status: "running", checkpoint: { phase: "charge", key: newKey() } }),
 					context,
 				);
 			},
 			charge: async (task, runtime, context) => {
 				const receipt = await payments.charge(task.state.checkpoint.key); // idempotent by key
-				await runtime.commit(async (tx, current) => {
+				await runtime.commitRun(async (tx, current) => {
 					const entry = await tx.appendEntry(current.conversationId, receiptEntry(receipt));
 					return { status: "terminal", outcome: { status: "completed", result: { entryId: entry.id } } };
 				}, context);
@@ -222,7 +222,10 @@ function examples() {
 		// The abort handler decides the outcome; returning without one faults the task.
 		abort: async (task, runtime, context) => {
 			await payments.cancel(task.state.checkpoint);
-			await runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted", reason: "user" } }), context);
+			await runtime.commitAbort(
+				() => ({ status: "terminal", outcome: { status: "aborted", reason: "user" } }),
+				context,
+			);
 		},
 	});
 

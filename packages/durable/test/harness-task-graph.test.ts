@@ -30,7 +30,7 @@ function family(gates: { readonly child: Promise<void>; readonly late: Promise<v
 		phases: {
 			work: async (task, runtime, ctx) => {
 				await (task.input.late ? gates.late : gates.child);
-				await runtime.commit(() => completed(null), ctx);
+				await runtime.commitRun(() => completed(null), ctx);
 			},
 		},
 		abort: async () => {},
@@ -43,24 +43,24 @@ function family(gates: { readonly child: Promise<void>; readonly late: Promise<v
 			spawn: async (task, runtime, ctx) => {
 				const ownership = { kind: "task", taskId: task.id } as const;
 				// Two conversations in a commit that leaves the parent's record unchanged.
-				await runtime.commit(async (tx) => {
+				await runtime.commitRun(async (tx) => {
 					await tx.createConversation({ ownership });
 					await tx.createConversation({ ownership });
 					return undefined;
 				}, ctx);
-				await runtime.commit(async (tx) => {
+				await runtime.commitRun(async (tx) => {
 					const child = await tx.createTask(Child, { late: false }, { ownership });
 					return { status: "waiting", checkpoint: { phase: "join", child }, on: [child], policy: "allSettled" };
 				}, ctx);
 			},
 			join: async (task, runtime, ctx) => {
-				await runtime.commit(async (tx) => {
+				await runtime.commitRun(async (tx) => {
 					await tx.createTask(Child, { late: true }, { ownership: { kind: "task", taskId: task.id } });
 					return { status: "running", checkpoint: { phase: "finish" } };
 				}, ctx);
 			},
 			finish: async (_task, runtime, ctx) => {
-				await runtime.commit(() => completed(null), ctx);
+				await runtime.commitRun(() => completed(null), ctx);
 			},
 		},
 		abort: async () => {},
@@ -176,11 +176,14 @@ describe("task graph view", () => {
 			phases: {
 				work: async (_task, runtime, ctx) => {
 					await Promise.race([gate.promise, aborted(runtime.signal)]);
-					await runtime.commit(() => completed(null), ctx);
+					await runtime.commitRun(() => completed(null), ctx);
 				},
 			},
 			abort: async (_task, runtime, ctx) => {
-				await runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted", reason: "test" } }), ctx);
+				await runtime.commitAbort(
+					() => ({ status: "terminal", outcome: { status: "aborted", reason: "test" } }),
+					ctx,
+				);
 			},
 		});
 		const first = await openTasks(await openNodeSqliteStorage(path), [Work]);
@@ -246,7 +249,7 @@ describe("task graph view", () => {
 			initial: () => ({ phase: "spawn" }),
 			phases: {
 				spawn: async (task, runtime, ctx) => {
-					await runtime.commit(async (tx) => {
+					await runtime.commitRun(async (tx) => {
 						const ownership = { kind: "task", taskId: task.id } as const;
 						const [forked, fresh] = await Promise.all([
 							tx.forkConversation(runtime.conversationId, task.input.at, { ownership }),
@@ -256,7 +259,7 @@ describe("task graph view", () => {
 						return undefined;
 					}, ctx);
 					await gate.promise;
-					await runtime.commit(() => completed(null), ctx);
+					await runtime.commitRun(() => completed(null), ctx);
 				},
 			},
 			abort: async () => {},
@@ -321,7 +324,7 @@ describe("task graph view", () => {
 					await runtime.memo("seen", true, ctx);
 					reached.resolve();
 					await gate.promise;
-					await runtime.commit(() => completed(null), ctx);
+					await runtime.commitRun(() => completed(null), ctx);
 				},
 			},
 			abort: async () => {},

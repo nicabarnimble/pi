@@ -15,7 +15,7 @@ const Dormant = defineTask<null, { phase: "work" }, null>({
 		},
 	},
 	abort: async (_task, runtime, abortContext) => {
-		await runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), abortContext);
+		await runtime.commitAbort(() => ({ status: "terminal", outcome: { status: "aborted" } }), abortContext);
 	},
 });
 
@@ -49,7 +49,7 @@ describe("work below a cancelled owner", () => {
 				first: async (_task, runtime, phaseContext) => {
 					entered.resolve();
 					await advance.promise;
-					await runtime.commit(() => ({ status: "running", checkpoint: { phase: "next" } }), phaseContext);
+					await runtime.commitRun(() => ({ status: "running", checkpoint: { phase: "next" } }), phaseContext);
 				},
 				next: async (_task, runtime) => {
 					ranNext = true;
@@ -57,7 +57,7 @@ describe("work below a cancelled owner", () => {
 				},
 			},
 			abort: async (_task, runtime, abortContext) => {
-				await runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), abortContext);
+				await runtime.commitAbort(() => ({ status: "terminal", outcome: { status: "aborted" } }), abortContext);
 			},
 		});
 		const { harness } = await openTasks(storage, [Dormant, Child]);
