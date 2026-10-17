@@ -15,17 +15,7 @@ import { API } from "typescript/unstable/sync";
 // Not flagged: the key parser (packages/tui/src/keys.ts) and its tests, calls whose
 // key id is computed (KeybindingsManager.matches, extension shortcuts), and example
 // components, which use matchesKey for widget-local input.
-// The list below is the product calls that still hardcode a key. A new one fails.
-export const knownHardcodedMatchesKeyCalls = [
-	'packages/coding-agent/src/modes/interactive/components/config-selector.ts "ctrl+c"',
-	'packages/coding-agent/src/modes/interactive/components/scoped-models-selector.ts Key.ctrl("c")',
-	'packages/coding-agent/src/modes/interactive/components/scoped-models-selector.ts Key.escape',
-	'packages/tui/src/components/editor.ts "enter"',
-	'packages/tui/src/components/editor.ts "shift+backspace"',
-	'packages/tui/src/components/editor.ts "shift+delete"',
-	'packages/tui/src/components/editor.ts "shift+space"',
-	'packages/tui/src/tui.ts "shift+ctrl+d"',
-];
+// Any remaining hardcoded call in packages/*/src fails this check.
 
 const parserImplementation = "packages/tui/src/keys.ts";
 
@@ -139,35 +129,13 @@ export function findHardcodedMatchesKeyCalls(root) {
 	return calls;
 }
 
-export function diffHardcodedMatchesKeyCalls(found, known) {
-	const extra = [];
-	const missing = [];
-	const foundCounts = new Map();
-	const knownCounts = new Map();
-	for (const call of found) foundCounts.set(call, (foundCounts.get(call) ?? 0) + 1);
-	for (const call of known) knownCounts.set(call, (knownCounts.get(call) ?? 0) + 1);
-	for (const [call, count] of foundCounts) {
-		const expected = knownCounts.get(call) ?? 0;
-		for (let i = expected; i < count; i++) extra.push(call);
-	}
-	for (const [call, count] of knownCounts) {
-		const actual = foundCounts.get(call) ?? 0;
-		for (let i = actual; i < count; i++) missing.push(call);
-	}
-	extra.sort();
-	missing.sort();
-	return { extra, missing };
-}
-
 function main() {
 	const found = findHardcodedMatchesKeyCalls(process.cwd());
-	const { extra, missing } = diffHardcodedMatchesKeyCalls(found, knownHardcodedMatchesKeyCalls);
 	console.log(`matchesKey: ${found.length} hardcoded call(s)`);
-	if (extra.length === 0 && missing.length === 0) return;
+	if (found.length === 0) return;
 
-	console.error("Hardcoded matchesKey() calls changed. Add the key to TUI_KEYBINDINGS or APP_KEYBINDINGS.");
-	for (const call of extra) console.error(`  new: ${call}`);
-	for (const call of missing) console.error(`  gone: ${call}`);
+	console.error("Hardcoded matchesKey() calls are not allowed. Add the key to TUI_KEYBINDINGS or APP_KEYBINDINGS.");
+	for (const call of found) console.error(`  ${call}`);
 	process.exit(1);
 }
 

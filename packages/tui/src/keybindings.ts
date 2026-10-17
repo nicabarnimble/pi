@@ -29,11 +29,14 @@ export interface Keybindings {
 	"tui.editor.yank": true;
 	"tui.editor.yankPop": true;
 	"tui.editor.undo": true;
+	"tui.editor.insertSpace": true;
 	// Generic input actions
 	"tui.input.newLine": true;
 	"tui.input.submit": true;
+	"tui.input.enter": true;
 	"tui.input.tab": true;
 	"tui.input.copy": true;
+	"tui.debug": true;
 	// Generic selection actions
 	"tui.select.up": true;
 	"tui.select.down": true;
@@ -114,11 +117,11 @@ export const TUI_KEYBINDINGS = {
 	"tui.editor.pageUp": { defaultKeys: ["pageUp", "ctrl+pageUp"], description: "Page up" },
 	"tui.editor.pageDown": { defaultKeys: ["pageDown", "ctrl+pageDown"], description: "Page down" },
 	"tui.editor.deleteCharBackward": {
-		defaultKeys: "backspace",
+		defaultKeys: ["backspace", "shift+backspace"],
 		description: "Delete character backward",
 	},
 	"tui.editor.deleteCharForward": {
-		defaultKeys: ["delete", "ctrl+d"],
+		defaultKeys: ["delete", "ctrl+d", "shift+delete"],
 		description: "Delete character forward",
 	},
 	"tui.editor.deleteWordBackward": {
@@ -140,10 +143,13 @@ export const TUI_KEYBINDINGS = {
 	"tui.editor.yank": { defaultKeys: "ctrl+y", description: "Yank" },
 	"tui.editor.yankPop": { defaultKeys: "alt+y", description: "Yank pop" },
 	"tui.editor.undo": { defaultKeys: "ctrl+-", description: "Undo" },
+	"tui.editor.insertSpace": { defaultKeys: "shift+space", description: "Insert space" },
 	"tui.input.newLine": { defaultKeys: ["shift+enter", "ctrl+j"], description: "Insert newline" },
 	"tui.input.submit": { defaultKeys: "enter", description: "Submit input" },
+	"tui.input.enter": { defaultKeys: "enter", description: "Unmodified Enter" },
 	"tui.input.tab": { defaultKeys: "tab", description: "Tab / autocomplete" },
 	"tui.input.copy": { defaultKeys: "ctrl+c", description: "Copy selection" },
+	"tui.debug": { defaultKeys: "shift+ctrl+d", description: "Trigger debug handler" },
 	"tui.select.up": { defaultKeys: "up", description: "Move selection up" },
 	"tui.select.down": { defaultKeys: "down", description: "Move selection down" },
 	"tui.select.pageUp": { defaultKeys: "pageUp", description: "Selection page up" },

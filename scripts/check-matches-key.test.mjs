@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { diffHardcodedMatchesKeyCalls, findHardcodedMatchesKeyCalls, knownHardcodedMatchesKeyCalls } from "./check-matches-key.mjs";
+import { findHardcodedMatchesKeyCalls } from "./check-matches-key.mjs";
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const script = fileURLToPath(new URL("./check-matches-key.mjs", import.meta.url));
@@ -45,26 +45,17 @@ test("flags hardcoded matchesKey calls and ignores the parser, computed keys, te
 		"packages/tui/src/app.ts Key.ctrl(\"c\")",
 		"packages/tui/src/app.ts Key.escape",
 	]);
+
+	const result = spawnSync(process.execPath, [script], { cwd: root, encoding: "utf8" });
+	assert.equal(result.status, 1);
+	assert.match(result.stdout, /matchesKey: 4 hardcoded call\(s\)/);
+	assert.match(result.stderr, /packages\/tui\/src\/app\.ts "ctrl\+x"/);
 });
 
-test("repo hardcoded matchesKey calls match the known list", () => {
+test("repo has no hardcoded matchesKey calls", () => {
 	const found = findHardcodedMatchesKeyCalls(repoRoot);
-	const { extra, missing } = diffHardcodedMatchesKeyCalls(found, knownHardcodedMatchesKeyCalls);
-	assert.deepEqual(extra, []);
-	assert.deepEqual(missing, []);
-	assert.equal(found.length, 8);
+	assert.deepEqual(found, []);
 	const result = spawnSync(process.execPath, [script], { cwd: repoRoot, encoding: "utf8" });
 	assert.equal(result.status, 0, result.stderr);
-	assert.match(result.stdout, /matchesKey: 8 hardcoded call\(s\)/);
-});
-
-test("diff reports a new hardcoded call and a removed one", () => {
-	const diff = diffHardcodedMatchesKeyCalls(
-		['packages/tui/src/tui.ts "shift+ctrl+d"', 'packages/tui/src/next.ts "ctrl+x"'],
-		['packages/tui/src/tui.ts "shift+ctrl+d"', 'packages/tui/src/old.ts "escape"'],
-	);
-	assert.deepEqual(diff, {
-		extra: ['packages/tui/src/next.ts "ctrl+x"'],
-		missing: ['packages/tui/src/old.ts "escape"'],
-	});
+	assert.match(result.stdout, /matchesKey: 0 hardcoded call\(s\)/);
 });

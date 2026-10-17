@@ -1,6 +1,6 @@
 import type { AutocompleteProvider, AutocompleteSuggestions } from "../autocomplete.ts";
 import { getKeybindings } from "../keybindings.ts";
-import { decodePrintableKey, matchesKey } from "../keys.ts";
+import { decodePrintableKey } from "../keys.ts";
 import { KillRing } from "../kill-ring.ts";
 import {
 	type Component,
@@ -838,11 +838,11 @@ export class Editor implements Component, Focusable {
 			this.deleteWordForward();
 			return;
 		}
-		if (kb.matches(data, "tui.editor.deleteCharBackward") || matchesKey(data, "shift+backspace")) {
+		if (kb.matches(data, "tui.editor.deleteCharBackward")) {
 			this.handleBackspace();
 			return;
 		}
-		if (kb.matches(data, "tui.editor.deleteCharForward") || matchesKey(data, "shift+delete")) {
+		if (kb.matches(data, "tui.editor.deleteCharForward")) {
 			this.handleForwardDelete();
 			return;
 		}
@@ -977,8 +977,7 @@ export class Editor implements Component, Focusable {
 			return;
 		}
 
-		// Shift+Space - insert regular space
-		if (matchesKey(data, "shift+space")) {
+		if (kb.matches(data, "tui.editor.insertSpace")) {
 			this.insertCharacter(" ");
 			return;
 		}
@@ -1352,7 +1351,7 @@ export class Editor implements Component, Focusable {
 
 	private shouldSubmitOnBackslashEnter(data: string, kb: ReturnType<typeof getKeybindings>): boolean {
 		if (this.disableSubmit) return false;
-		if (!matchesKey(data, "enter")) return false;
+		if (!kb.matches(data, "tui.input.enter")) return false;
 		const submitKeys = kb.getKeys("tui.input.submit");
 		const hasShiftEnter = submitKeys.includes("shift+enter") || submitKeys.includes("shift+return");
 		if (!hasShiftEnter) return false;

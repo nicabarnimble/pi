@@ -37,7 +37,7 @@ describe("scoped models selector", () => {
 		harness = undefined;
 	});
 
-	async function createSelector(models: ModelState[]) {
+	async function createSelector(models: ModelState[], onCancel: () => void = () => {}) {
 		harness = await createHarness({ models });
 		const provider = harness.models[0].provider;
 		const selector = new ScopedModelsSelectorComponent(
@@ -52,7 +52,7 @@ describe("scoped models selector", () => {
 					}
 				},
 				onPersist: () => {},
-				onCancel: () => {},
+				onCancel,
 			},
 		);
 		return selector;
@@ -122,5 +122,48 @@ describe("scoped models selector", () => {
 		expect(models.map((model) => model.enabled)).toEqual([true, true, true]);
 		expect(getMarkerStates(selector, models)).toEqual([true, true, true]);
 		expect(stripAnsi(selector.render(120).join("\n"))).toContain("all enabled");
+	});
+
+	it("clears search on ctrl+c and cancels on escape", async () => {
+		let cancelled = 0;
+		const selector = await createSelector([{ id: "model-a", name: "Model A", enabled: true }], () => {
+			cancelled++;
+		});
+
+		selector.handleInput("a");
+		selector.handleInput("\x03");
+		expect(selector.getSearchInput().getValue()).toBe("");
+		expect(cancelled).toBe(0);
+
+		selector.handleInput("\x03");
+		expect(cancelled).toBe(1);
+
+		selector.handleInput("a");
+		selector.handleInput("\x1b");
+		expect(cancelled).toBe(2);
+	});
+
+	it("follows remaps of model search clear and cancel", async () => {
+		let cancelled = 0;
+		const selector = await createSelector([{ id: "model-a", name: "Model A", enabled: true }], () => {
+			cancelled++;
+		});
+
+		setKeybindings(new KeybindingsManager({ "app.models.clearSearch": "ctrl+q" }));
+		selector.handleInput("a");
+		selector.handleInput("\x11");
+		expect(selector.getSearchInput().getValue()).toBe("");
+		expect(cancelled).toBe(0);
+
+		selector.handleInput("a");
+		selector.handleInput("\x03");
+		expect(selector.getSearchInput().getValue()).toBe("a");
+		expect(cancelled).toBe(1);
+
+		setKeybindings(new KeybindingsManager({ "tui.select.cancel": "ctrl+g" }));
+		selector.handleInput("\x1b");
+		expect(cancelled).toBe(1);
+		selector.handleInput("\x07");
+		expect(cancelled).toBe(2);
 	});
 });

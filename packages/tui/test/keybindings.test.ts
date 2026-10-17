@@ -27,6 +27,21 @@ describe("KeybindingsManager", () => {
 		assert.deepStrictEqual(keybindings.getKeys("tui.editor.historyNext"), []);
 	});
 
+	it("binds shifted delete, space, enter, and debug to configurable defaults", () => {
+		const keybindings = new KeybindingsManager(TUI_KEYBINDINGS);
+
+		assert.deepStrictEqual(keybindings.getKeys("tui.editor.deleteCharBackward"), ["backspace", "shift+backspace"]);
+		assert.deepStrictEqual(keybindings.getKeys("tui.editor.deleteCharForward"), ["delete", "ctrl+d", "shift+delete"]);
+		assert.deepStrictEqual(keybindings.getKeys("tui.editor.insertSpace"), ["shift+space"]);
+		assert.deepStrictEqual(keybindings.getKeys("tui.input.enter"), ["enter"]);
+		assert.deepStrictEqual(keybindings.getKeys("tui.debug"), ["shift+ctrl+d"]);
+		assert.strictEqual(keybindings.matches("\x1b[127;2u", "tui.editor.deleteCharBackward"), true);
+		assert.strictEqual(keybindings.matches("\x1b[3$", "tui.editor.deleteCharForward"), true);
+		assert.strictEqual(keybindings.matches("\x1b[32;2u", "tui.editor.insertSpace"), true);
+		assert.strictEqual(keybindings.matches("\r", "tui.input.enter"), true);
+		assert.strictEqual(keybindings.matches("\x1b[100;6u", "tui.debug"), true);
+	});
+
 	it("binds unmodified terminal viewport shortcuts to alternate-screen navigation", () => {
 		const keybindings = new KeybindingsManager(TUI_KEYBINDINGS);
 
