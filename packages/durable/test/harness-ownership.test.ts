@@ -54,7 +54,7 @@ const Hold = defineTask<{ name: string; slowAbort?: boolean }, { phase: "hold" }
 		hold: async (task, runtime, ctx) => {
 			runs.set(task.input.name, (runs.get(task.input.name) ?? 0) + 1);
 			const ending = await Promise.race([gate(task.input.name).promise, aborted(runtime.signal)]);
-			await runtime.commit(
+			await runtime.commitRun(
 				() =>
 					ending === "completed"
 						? { status: "terminal", outcome: { status: "completed", result: null } }
@@ -65,7 +65,7 @@ const Hold = defineTask<{ name: string; slowAbort?: boolean }, { phase: "hold" }
 	},
 	abort: async (task, runtime, ctx) => {
 		if (task.input.slowAbort === true) await gate(`abort.${task.input.name}`).promise;
-		await runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), ctx);
+		await runtime.commitAbort(() => ({ status: "terminal", outcome: { status: "aborted" } }), ctx);
 	},
 });
 
@@ -77,13 +77,16 @@ const Waiter = defineTask<{ on: TaskId[] }, { phase: "wait" } | { phase: "done" 
 	phases: {
 		wait: async (task, runtime, ctx) => {
 			const checkpoint = { phase: "done" } as const;
-			await runtime.commit(() => ({ status: "waiting", checkpoint, on: task.input.on, policy: "allSettled" }), ctx);
+			await runtime.commitRun(
+				() => ({ status: "waiting", checkpoint, on: task.input.on, policy: "allSettled" }),
+				ctx,
+			);
 		},
 		done: async (_task, runtime, ctx) =>
-			runtime.commit(() => ({ status: "terminal", outcome: { status: "completed", result: null } }), ctx),
+			runtime.commitRun(() => ({ status: "terminal", outcome: { status: "completed", result: null } }), ctx),
 	},
 	abort: async (_task, runtime, ctx) =>
-		runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), ctx),
+		runtime.commitAbort(() => ({ status: "terminal", outcome: { status: "aborted" } }), ctx),
 });
 
 /** Tries to create, in the commit that ends it, a conversation it owns with a held task in it, named by its input. */
@@ -93,7 +96,7 @@ const Spawner = defineTask<{ name: string }, { phase: "spawn" }, null>({
 	initial: () => ({ phase: "spawn" }),
 	phases: {
 		spawn: async (task, runtime, ctx) =>
-			runtime.commit(async (tx) => {
+			runtime.commitRun(async (tx) => {
 				const child = await tx.createConversation({ ownership: { kind: "task", taskId: task.id } });
 				await tx.createTask(
 					Hold,
@@ -104,7 +107,7 @@ const Spawner = defineTask<{ name: string }, { phase: "spawn" }, null>({
 			}, ctx),
 	},
 	abort: async (_task, runtime, ctx) =>
-		runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), ctx),
+		runtime.commitAbort(() => ({ status: "terminal", outcome: { status: "aborted" } }), ctx),
 });
 
 /** Never registered: aborting it can only orphan it. */
@@ -1331,14 +1334,14 @@ describe("owned conversations from tools and supervisors", () => {
 					const submission = await child.submit({ type: "input", content: "work", requestId: "stable" }, ctx);
 					const settled = await submission.wait(ctx);
 					if (settled.status !== "done" || settled.type !== "input") throw new Error(settled.status);
-					await runtime.commit(
+					await runtime.commitRun(
 						() => ({ status: "terminal", outcome: { status: "completed", result: { answer: settled.answer } } }),
 						ctx,
 					);
 				},
 			},
 			abort: (_task, runtime, ctx) =>
-				runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), ctx),
+				runtime.commitAbort(() => ({ status: "terminal", outcome: { status: "aborted" } }), ctx),
 		});
 		const setup = chatSetup();
 		addTask(setup.registry, Supervisor);

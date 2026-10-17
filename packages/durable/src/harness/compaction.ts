@@ -8,7 +8,7 @@ import type {
 	ConversationId,
 	EntryDraft,
 	EntryId,
-	NextTaskState,
+	RunNextTaskState,
 	RunningTask,
 	TaskId,
 	TaskRuntime,
@@ -58,7 +58,7 @@ export type CompactionCheckpoint =
 	| ({ phase: "retry"; until: number } & SummaryRequest);
 
 type Runtime = TaskRuntime<CompactionInput, CompactionCheckpoint, CompactionResult, CompactionHooks>;
-type Next = NextTaskState<CompactionCheckpoint, CompactionResult>;
+type Next = RunNextTaskState<CompactionCheckpoint, CompactionResult>;
 
 /** Longest tool result text a serialized summary source keeps. */
 const TOOL_RESULT_MAX_CHARS = 2000;
@@ -152,7 +152,10 @@ export const CompactionTask = defineTask<CompactionInput, CompactionCheckpoint, 
 				tail: view.entries.reduce((tail, entry) => (entry.id > tail ? entry.id : tail), firstKept),
 				firstKept,
 			};
-			await runtime.commit(() => ({ status: "running", checkpoint: { phase: "summarize", ...request } }), context);
+			await runtime.commitRun(
+				() => ({ status: "running", checkpoint: { phase: "summarize", ...request } }),
+				context,
+			);
 		},
 		summarize: async (task, runtime, context) => {
 			const { phase: _, ...request } = task.state.checkpoint;
@@ -191,7 +194,7 @@ export const CompactionTask = defineTask<CompactionInput, CompactionCheckpoint, 
 				policy.enabled &&
 				attempt <= policy.maxRetries;
 			const until = retry ? runtime.now() + retryDelayMs(policy, attempt) : 0;
-			await runtime.commit(async (tx, current): Promise<Next> => {
+			await runtime.commitRun(async (tx, current): Promise<Next> => {
 				await recordUsage(
 					tx,
 					runtime.conversationId,
@@ -218,7 +221,7 @@ export const CompactionTask = defineTask<CompactionInput, CompactionCheckpoint, 
 			const { phase: _, until, ...request } = task.state.checkpoint;
 			await runtime.sleep(until, context);
 			const attempt = request.attempt + 1;
-			await runtime.commit(async (tx) => {
+			await runtime.commitRun(async (tx) => {
 				const status = compactionStatus(await tx.doc(LiveDoc, runtime.conversationId), runtime.taskId);
 				if (status !== undefined) {
 					status.attempt = attempt;
@@ -229,7 +232,7 @@ export const CompactionTask = defineTask<CompactionInput, CompactionCheckpoint, 
 		},
 	},
 	abort: async (_task, runtime, context) => {
-		await runtime.commit(async (tx) => {
+		await runtime.commitAbort(async (tx) => {
 			removeCompactionStatus(await tx.doc(LiveDoc, runtime.conversationId), runtime.taskId);
 			return { status: "terminal", outcome: { status: "aborted" } };
 		}, context);
@@ -415,7 +418,7 @@ function truncate(text: string, maxChars: number): string {
 
 /** Place a summary supplied by a hook in its own commit. */
 async function place(runtime: Runtime, firstKept: EntryId, summary: string, context: Context): Promise<void> {
-	await runtime.commit(
+	await runtime.commitRun(
 		async (tx, current) =>
 			placeSummary(tx, runtime, current, await tx.doc(LiveDoc, runtime.conversationId), firstKept, summary),
 		context,
@@ -462,7 +465,7 @@ async function placeSummary(
 
 /** Remove the status and complete without a summary. */
 async function complete(runtime: Runtime, context: Context): Promise<void> {
-	await runtime.commit(async (tx) => {
+	await runtime.commitRun(async (tx) => {
 		removeCompactionStatus(await tx.doc(LiveDoc, runtime.conversationId), runtime.taskId);
 		return { status: "terminal", outcome: { status: "completed", result: {} } };
 	}, context);
@@ -471,7 +474,7 @@ async function complete(runtime: Runtime, context: Context): Promise<void> {
 async function failNoModel(runtime: Runtime, ref: ModelRef | undefined, context: Context): Promise<void> {
 	const message =
 		ref === undefined ? "No model is configured" : `Model ${ref.provider}/${ref.modelId} is not available`;
-	await runtime.commit(async (tx) => {
+	await runtime.commitRun(async (tx) => {
 		failCompactionStatus(await tx.doc(LiveDoc, runtime.conversationId), runtime.taskId, message);
 		return { status: "terminal", outcome: { status: "failed", error: { message, detail: { reason: "no_model" } } } };
 	}, context);

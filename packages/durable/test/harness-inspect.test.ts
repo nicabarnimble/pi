@@ -16,7 +16,7 @@ function task(name: string, version: number, options: { gate?: Promise<void>; mi
 		phases: {
 			run: async (_task, runtime, ctx) => {
 				await options.gate;
-				await runtime.commit(() => completed(null), ctx);
+				await runtime.commitRun(() => completed(null), ctx);
 			},
 		},
 		abort: async () => {},
@@ -47,12 +47,12 @@ describe("Harness.inspect()", () => {
 			phases: {
 				wait: async (_task, runtime, ctx) => {
 					const checkpoint = { phase: "done" } as const;
-					await runtime.commit(
+					await runtime.commitRun(
 						() => ({ status: "waiting", checkpoint, on: [gateId!], policy: "allSettled" }),
 						ctx,
 					);
 				},
-				done: async (_task, runtime, ctx) => runtime.commit(() => completed(null), ctx),
+				done: async (_task, runtime, ctx) => runtime.commitRun(() => completed(null), ctx),
 			},
 			abort: async () => {},
 		});

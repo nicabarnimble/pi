@@ -1632,15 +1632,8 @@ export class TaskScheduler {
 			get registry() {
 				return phase.snapshot();
 			},
-			commit: (change, context) =>
-				this.#gated(
-					invocation,
-					async (tx, current) => {
-						const next = await change(tx, current);
-						if (next !== undefined) await this.#commitState(tx, invocation, current, next);
-					},
-					context,
-				),
+			commitRun: (change, context) => this.#commitNext(invocation, change, context),
+			commitAbort: (change, context) => this.#commitNext(invocation, change, context),
 			memo: ((name: string, ...rest: readonly unknown[]) => {
 				if (rest.length === 1) {
 					return this.#read(invocation, async () => memoOf(this.#live.get(invocation.taskId), name));
@@ -1785,6 +1778,28 @@ export class TaskScheduler {
 	async #read<T>(invocation: Invocation, read: () => Promise<T>): Promise<T> {
 		if (invocation.ended) throw endedError(invocation);
 		return read();
+	}
+
+	/**
+	 * Commit a run or abort callback on the Session line. Both methods share this path, including the abort-mark gate
+	 * and the `terminal` to `completing` rewrite.
+	 */
+	#commitNext(
+		invocation: Invocation,
+		change: (
+			tx: Transaction,
+			current: ErasedRunningTask,
+		) => NextTaskState<Checkpoint, JsonValue> | undefined | Promise<NextTaskState<Checkpoint, JsonValue> | undefined>,
+		context: Context,
+	): Promise<void> {
+		return this.#gated(
+			invocation,
+			async (tx, current) => {
+				const next = await change(tx, current);
+				if (next !== undefined) await this.#commitState(tx, invocation, current, next);
+			},
+			context,
+		);
 	}
 
 	/** Commit after rereading the task on the line and gating the invocation. */

@@ -29,7 +29,7 @@ function oneStep<R = null>(
 	name: string,
 	run: (task: { readonly id: TaskId<R> }, runtime: StepRuntime<R>, context: Context) => Promise<void>,
 	abort: (runtime: StepRuntime<R>, context: Context) => Promise<void> = (runtime, ctx) =>
-		runtime.commit(() => abortedWith("test"), ctx),
+		runtime.commitAbort(() => abortedWith("test"), ctx),
 ) {
 	return defineTask<null, Step, R>({
 		name,
@@ -44,7 +44,7 @@ function oneStep<R = null>(
 function gated(name: string, gate: Promise<void>) {
 	return oneStep(name, async (_task, runtime, ctx) => {
 		await gate;
-		await runtime.commit(() => completed(null), ctx);
+		await runtime.commitRun(() => completed(null), ctx);
 	});
 }
 
@@ -94,7 +94,7 @@ describe("task phases", () => {
 				count: async (task, runtime, ctx) => {
 					seen.push(task.state.checkpoint.n);
 					runtimes.add(runtime);
-					await runtime.commit((_tx, current) => {
+					await runtime.commitRun((_tx, current) => {
 						const n = current.state.checkpoint.n + 1;
 						return n === task.input.to ? completed(n) : { status: "running", checkpoint: { phase: "count", n } };
 					}, ctx);
@@ -121,7 +121,7 @@ describe("task phases", () => {
 		const Idle = oneStep("test.idle", async () => {});
 		const DocumentOnly = oneStep("test.document-only", async (_task, runtime, ctx) => {
 			// A commit that returns no state is not progress.
-			await runtime.commit(() => undefined, ctx);
+			await runtime.commitRun(() => undefined, ctx);
 		});
 		const Throws = oneStep("test.throws", async () => {
 			throw new Error("boom");
@@ -144,8 +144,8 @@ describe("task phases", () => {
 	it("keeps a committed terminal outcome when the handler throws afterwards", async () => {
 		let lateCommit: unknown;
 		const Done = oneStep<string>("test.done", async (_task, runtime, ctx) => {
-			await runtime.commit(() => completed("ok"), ctx);
-			lateCommit = await runtime.commit(() => undefined, ctx).catch((error: unknown) => error);
+			await runtime.commitRun(() => completed("ok"), ctx);
+			lateCommit = await runtime.commitRun(() => undefined, ctx).catch((error: unknown) => error);
 			throw new Error("after terminal");
 		});
 		const { harness, root } = await openRoot([Done]);
@@ -167,7 +167,10 @@ describe("task phases", () => {
 					const items = task.state.checkpoint.items;
 					// Two rounds of progress, then an equal copy of the checkpoint, which is no progress.
 					const next = items.length < 2 ? [...items, `item${items.length}`] : [...items];
-					await runtime.commit(() => ({ status: "running", checkpoint: { phase: "collect", items: next } }), ctx);
+					await runtime.commitRun(
+						() => ({ status: "running", checkpoint: { phase: "collect", items: next } }),
+						ctx,
+					);
 				},
 			},
 			abort: async () => {},
@@ -194,7 +197,7 @@ describe("task phases", () => {
 		});
 		const Answer = defineEntry("answer");
 		const Child = oneStep("test.child", async (_task, runtime, ctx) => {
-			await runtime.commit(() => completed(null), ctx);
+			await runtime.commitRun(() => completed(null), ctx);
 		});
 		let childId: TaskId | undefined;
 		let progressSeen: unknown;
@@ -211,7 +214,7 @@ describe("task phases", () => {
 					// Memo names never resolve to inherited object properties.
 					expect(await runtime.memo("toString", ctx)).toBeUndefined();
 					expect(await runtime.memo("toString", "own", ctx)).toBe("own");
-					await runtime.commit(async (tx) => {
+					await runtime.commitRun(async (tx) => {
 						(await tx.doc(Progress, task.id)).lines.push("wrote");
 						// Task creation defaults to the task's own conversation.
 						childId = await tx.createTask(Child, null, { ownership: { kind: "conversation" } });
@@ -220,10 +223,10 @@ describe("task phases", () => {
 				},
 				answer: async (task, runtime, ctx) => {
 					expect(task.memos).toEqual({ choice: "a", toString: "own" });
-					await runtime.commit(async (tx) => {
+					await runtime.commitRun(async (tx) => {
 						progressSeen = [...(await tx.doc(Progress, task.id)).lines];
 					}, ctx);
-					await runtime.commit(async (tx, current) => {
+					await runtime.commitRun(async (tx, current) => {
 						const entry = await tx.appendEntry(current.conversationId, { kind: "answer", model: [user("done")] });
 						return completed({ entryId: entry.id });
 					}, ctx);
@@ -267,20 +270,20 @@ describe("task phases", () => {
 				wait: async (_task, runtime, ctx) => {
 					order.push("wait");
 					const checkpoint = { phase: "resume" } as const;
-					await runtime.commit(() => ({ status: "waiting", checkpoint, on, policy: "allSettled" }), ctx);
+					await runtime.commitRun(() => ({ status: "waiting", checkpoint, on, policy: "allSettled" }), ctx);
 				},
 				resume: async (_task, runtime, ctx) => {
 					order.push("resume");
 					outcomes = (await runtime.outcomes(on, ctx)).map((outcome) => outcome.status);
-					await runtime.commit(() => completed(null), ctx);
+					await runtime.commitRun(() => completed(null), ctx);
 				},
 			},
-			abort: async (_task, runtime, ctx) => runtime.commit(() => abortedWith("test"), ctx),
+			abort: async (_task, runtime, ctx) => runtime.commitAbort(() => abortedWith("test"), ctx),
 		});
 		const First = oneStep("test.first", async (_task, runtime, ctx) => {
 			order.push("first");
 			await gate.promise;
-			await runtime.commit(() => completed(null), ctx);
+			await runtime.commitRun(() => completed(null), ctx);
 		});
 		const Faulting = oneStep("test.faulting", async () => {
 			order.push("faulting");
@@ -318,11 +321,11 @@ describe("task phases", () => {
 			phases: {
 				wait: (_task, runtime, ctx) => {
 					const checkpoint = { phase: "resume" } as const;
-					return runtime.commit(() => ({ status: "waiting", checkpoint, on, policy: "allSettled" }), ctx);
+					return runtime.commitRun(() => ({ status: "waiting", checkpoint, on, policy: "allSettled" }), ctx);
 				},
-				resume: (_task, runtime, ctx) => runtime.commit(() => completed(null), ctx),
+				resume: (_task, runtime, ctx) => runtime.commitRun(() => completed(null), ctx),
 			},
-			abort: async (_task, runtime, ctx) => runtime.commit(() => abortedWith("test"), ctx),
+			abort: async (_task, runtime, ctx) => runtime.commitAbort(() => abortedWith("test"), ctx),
 		});
 		const Held = gated("test.timed-held", gate.promise);
 		const { harness, root } = await openRoot([Waiter, Held], { now: () => clock });
@@ -372,11 +375,11 @@ describe("task phases", () => {
 					entered.resolve();
 					await phaseGate.promise;
 					seen.push({ phase: "a", tools: tools(runtime.registry), same: runtime.registry === before });
-					await runtime.commit(() => ({ status: "running", checkpoint: { phase: "b" } }), ctx);
+					await runtime.commitRun(() => ({ status: "running", checkpoint: { phase: "b" } }), ctx);
 				},
 				b: async (_task, runtime, ctx) => {
 					seen.push({ phase: "b", tools: tools(runtime.registry), same: true });
-					await runtime.commit(() => completed(null), ctx);
+					await runtime.commitRun(() => completed(null), ctx);
 				},
 			},
 			abort: async () => {},
@@ -438,12 +441,12 @@ describe("task phases", () => {
 						thinking: second.thinkingLevel,
 						same: second === first,
 					});
-					await runtime.commit(() => ({ status: "running", checkpoint: { phase: "b" } }), ctx);
+					await runtime.commitRun(() => ({ status: "running", checkpoint: { phase: "b" } }), ctx);
 				},
 				b: async (_task, runtime, ctx) => {
 					const agent = await runtime.agent(ctx);
 					seen.push({ phase: "b", pings: await ping(runtime), thinking: agent.thinkingLevel });
-					await runtime.commit(() => completed(null), ctx);
+					await runtime.commitRun(() => completed(null), ctx);
 				},
 			},
 			abort: async () => {},
@@ -483,7 +486,7 @@ describe("task phases", () => {
 			caller.cancel(new Error("caller gone"));
 			cancelled = await runtime.agent(caller.context).catch((error: unknown) => error);
 			resolved = (await runtime.agent(ctx)).thinkingLevel;
-			await runtime.commit(() => completed(null), ctx);
+			await runtime.commitRun(() => completed(null), ctx);
 		});
 		const { harness, root } = await openRoot([Agent]);
 		await harness.waitForTask(await start(root, Agent), context);
@@ -509,7 +512,7 @@ describe("task phases", () => {
 			// Let an unobserved rejection surface before the task ends.
 			await new Promise((resolve) => setTimeout(resolve, 0));
 			resolved = await runtime.agent(ctx).catch((error: unknown) => error);
-			await runtime.commit(() => completed(null), ctx);
+			await runtime.commitRun(() => completed(null), ctx);
 		});
 		const { harness, root } = await openRoot([Agent], { settings });
 		await harness.waitForTask(await start(root, Agent), context);
@@ -546,7 +549,7 @@ describe("task runtime", () => {
 				delivered.push(value?.text ?? "retired");
 			});
 			watchClosed = watch?.closed;
-			await runtime.commit(() => completed(null), ctx);
+			await runtime.commitRun(() => completed(null), ctx);
 		});
 		const { harness, root } = await openRoot([Watcher]);
 		await harness.commit(async (tx) => {
@@ -564,7 +567,7 @@ describe("task runtime", () => {
 		await flush();
 		expect(delivered).toEqual([]);
 		const runtime = captured!;
-		await expect(runtime.commit(() => {}, context)).rejects.toThrow("invocation has ended");
+		await expect(runtime.commitRun(() => {}, context)).rejects.toThrow("invocation has ended");
 		await expect(runtime.memo("x", context)).rejects.toThrow("invocation has ended");
 		await expect(runtime.memo("x", 1, context)).rejects.toThrow("invocation has ended");
 		await expect(runtime.sleep(0, context)).rejects.toThrow("invocation has ended");
@@ -598,7 +601,7 @@ describe("task runtime", () => {
 			seen.push((await runtime.context(runtime.conversationId, ctx, { at: second })).messages.length);
 			seen.push(runtime.now());
 			runtime.report(new Error("reported"));
-			await runtime.commit(() => completed(null), ctx);
+			await runtime.commitRun(() => completed(null), ctx);
 		});
 		const { harness, root, reports } = await openRoot([Reader], { now: () => 1234 });
 		for (const text of ["one", "two"]) {
@@ -631,10 +634,10 @@ describe("task runtime", () => {
 			void harnessRef!.commit(async (tx) => {
 				await tx.appendEntry(runtime.conversationId, { kind: "blocker" });
 			}, context);
-			before = runtime.commit(() => completed("before"), context);
+			before = runtime.commitRun(() => completed("before"), context);
 			// Queued after the handler returned, so after the step.
 			setTimeout(() => {
-				after = runtime.commit(() => completed("after"), context);
+				after = runtime.commitRun(() => completed("after"), context);
 			}, 0);
 		});
 		const { harness, root } = await openRoot([Detached], { storage });
@@ -695,7 +698,7 @@ describe("task runtime", () => {
 			await runtime.sleep(900, ctx);
 			await runtime.sleep(1_005, ctx);
 			woke.resolve();
-			await runtime.commit(() => completed(null), ctx);
+			await runtime.commitRun(() => completed(null), ctx);
 		});
 		const { harness, root } = await openRoot([Sleeper], { now: () => clock });
 		const id = await start(root, Sleeper);
@@ -723,7 +726,7 @@ describe("task runtime", () => {
 			const sleeping = runtime.sleep(Date.now() + 60_000, withSignal(controller.signal));
 			controller.abort(new Error("stop sleeping"));
 			await sleeping.catch((error: unknown) => results.push(`cancelled:${(error as Error).message}`));
-			await runtime.commit(() => completed(null), ctx);
+			await runtime.commitRun(() => completed(null), ctx);
 		});
 		const { harness, root } = await openRoot([Signalled, Cancelled]);
 		const signalled = await start(root, Signalled);
@@ -746,7 +749,7 @@ describe("task scheduling", () => {
 		let runs = 0;
 		const Once = oneStep("test.once", async (_task, runtime, ctx) => {
 			runs++;
-			await runtime.commit(() => completed(null), ctx);
+			await runtime.commitRun(() => completed(null), ctx);
 		});
 		const storage = new ControlledStorage();
 		const { harness, root, reports } = await openRoot([Once], { storage });
@@ -807,7 +810,7 @@ describe("task scheduling", () => {
 		const gates = new Map<TaskId, () => void>();
 		const Gated = oneStep("test.gated", async (task, runtime, ctx) => {
 			await new Promise<void>((resolve) => gates.set(task.id, resolve));
-			await runtime.commit(() => completed(null), ctx);
+			await runtime.commitRun(() => completed(null), ctx);
 		});
 		const { harness, root } = await openRoot([Gated]);
 		await harness.waitForIdle(context);
@@ -855,7 +858,7 @@ describe("task scheduling", () => {
 
 	it("rejects unknown tasks and reports terminal tasks", async () => {
 		const Done = oneStep("test.quick", async (_task, runtime, ctx) => {
-			await runtime.commit(() => completed(null), ctx);
+			await runtime.commitRun(() => completed(null), ctx);
 		});
 		const { harness, root } = await openRoot([Done]);
 		const unknown = 999_999 as TaskId;
@@ -931,14 +934,14 @@ describe("task abort", () => {
 				memoRead = await runtime.memo("kept", context);
 				await runtime.memo("late", 2, context).catch((error: unknown) => errors.push((error as Error).message));
 				await runtime
-					.commit(() => completed(null), context)
+					.commitRun(() => completed(null), context)
 					.catch((error: unknown) => {
 						errors.push((error as Error).message);
 					});
 			},
 			async (runtime, ctx) => {
 				abortRuntimes.push(runtime);
-				await runtime.commit((_tx, current) => {
+				await runtime.commitAbort((_tx, current) => {
 					expect(current.abortRequested).toBe(true);
 					expect(current.memos).toEqual({ kept: 1 });
 					return abortedWith("mark");
@@ -969,7 +972,7 @@ describe("task abort", () => {
 			phases: {
 				one: async (_task, runtime, ctx) => {
 					phases.push("one");
-					await runtime.commit(() => ({ status: "running", checkpoint: { phase: "two" } }), ctx);
+					await runtime.commitRun(() => ({ status: "running", checkpoint: { phase: "two" } }), ctx);
 					reached.resolve();
 					// Ignores the signal and returns normally after the mark.
 					await proceed.promise;
@@ -980,7 +983,7 @@ describe("task abort", () => {
 			},
 			abort: async (_task, runtime, ctx) => {
 				phases.push("abort");
-				await runtime.commit(() => abortedWith("boundary"), ctx);
+				await runtime.commitAbort(() => abortedWith("boundary"), ctx);
 			},
 		});
 		const { harness, root } = await openRoot([Two]);
@@ -1023,7 +1026,7 @@ describe("task abort", () => {
 		let first: TaskId | undefined;
 		const wait = async (_task: unknown, runtime: StepRuntime<null>, ctx: Context): Promise<void> => {
 			const checkpoint = { phase: "run" } as const;
-			await runtime.commit(() => ({ status: "waiting", checkpoint, on: [first!], policy: "allSettled" }), ctx);
+			await runtime.commitRun(() => ({ status: "waiting", checkpoint, on: [first!], policy: "allSettled" }), ctx);
 		};
 		const Lazy = oneStep("test.lazy-abort", wait, async () => {});
 		const Throwing = oneStep("test.throwing-abort", wait, async () => {
@@ -1069,7 +1072,7 @@ describe("task abort", () => {
 				reached.resolve();
 				await proceed.promise;
 				abortSignalled = runtime.signal.aborted;
-				await runtime.commit(() => abortedWith("once"), ctx);
+				await runtime.commitAbort(() => abortedWith("once"), ctx);
 			},
 		);
 		const { harness, root } = await openRoot([Run]);
@@ -1099,7 +1102,7 @@ describe("task abort", () => {
 				await aborted(runtime.signal);
 			},
 			async (runtime, ctx) => {
-				await runtime.commit(() => abortedWith("done"), ctx);
+				await runtime.commitAbort(() => abortedWith("done"), ctx);
 				throw new Error("after terminal");
 			},
 		);
@@ -1172,7 +1175,7 @@ describe("task close", () => {
 			phases: {
 				one: async (_task, runtime, ctx) => {
 					phases.push("one");
-					await runtime.commit(() => ({ status: "running", checkpoint: { phase: "two" } }), ctx);
+					await runtime.commitRun(() => ({ status: "running", checkpoint: { phase: "two" } }), ctx);
 					reached.resolve();
 					// Ignores signals and returns normally once released; the closing rule wins over the next phase.
 					await proceed.promise;
@@ -1305,7 +1308,7 @@ describe("task close", () => {
 			void harnessRef!.commit(async (tx) => {
 				await tx.appendEntry(runtime.conversationId, { kind: "blocker" });
 			}, context);
-			queued = runtime.commit(() => completed(null), context).catch((error: unknown) => error);
+			queued = runtime.commitRun(() => completed(null), context).catch((error: unknown) => error);
 			// Ignores the close signal, so the invocation is still alive when the queued commit reaches the line.
 			await proceed.promise;
 		});
@@ -1351,7 +1354,7 @@ describe("task close", () => {
 			phases: {
 				one: async (_task, runtime, ctx) => {
 					phases.push("one");
-					await runtime.commit(() => ({ status: "running", checkpoint: { phase: "two" } }), ctx);
+					await runtime.commitRun(() => ({ status: "running", checkpoint: { phase: "two" } }), ctx);
 					closeOnSnapshot = true;
 				},
 				two: async () => {

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- `TaskRuntime.commit()` is removed. A run invocation commits with `commitRun()`, whose callback cannot return an `aborted` outcome. An abort handler commits with `commitAbort()`, whose callback can return only a terminal `aborted` outcome. Both still share the abort-mark gate and store a returned `terminal` state as `completing` while ordinary owned work is live.
+
 ### Added
 
 - `settings.compaction.modelOverrides` sets compaction thresholds per model, keyed by exact `"provider/modelId"`, so one harness can serve small- and large-window models; the threshold check, overflow recovery, and the compaction task use the entry of the model they act for ([#10942](https://github.com/earendil-works/pi/issues/10942)).

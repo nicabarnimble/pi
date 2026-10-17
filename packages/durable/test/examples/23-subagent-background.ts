@@ -64,10 +64,10 @@ const Anchor = defineTask<null, { phase: "done" }, null>({
 	initial: () => ({ phase: "done" }),
 	phases: {
 		done: (_anchor, runtime, taskContext) =>
-			runtime.commit(() => ({ status: "terminal", outcome: { status: "completed", result: null } }), taskContext),
+			runtime.commitRun(() => ({ status: "terminal", outcome: { status: "completed", result: null } }), taskContext),
 	},
 	abort: (_anchor, runtime, taskContext) =>
-		runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), taskContext),
+		runtime.commitAbort(() => ({ status: "terminal", outcome: { status: "aborted" } }), taskContext),
 });
 
 // A reporter delivers one message to a subagent and reports the answer to the main agent. It is a background task
@@ -90,7 +90,7 @@ const Reporter = defineTask<ReporterInput, ReporterState, null>({
 			const submission = await subagent.submit({ ...request, requestId: `subagent:${reporter.id}` }, taskContext);
 			const settled = await submission.wait(taskContext);
 			// One commit decides the report and records the answer as delivered, so a restart does not decide again.
-			await runtime.commit(async (tx) => {
+			await runtime.commitRun(async (tx) => {
 				const next = (report?: string) => ({ status: "running", checkpoint: { phase: "report", report } }) as const;
 				// `aborted`: stopped, or withdrawn while queued. Nothing to report.
 				if (settled.status === "unanswered") {
@@ -115,14 +115,14 @@ const Reporter = defineTask<ReporterInput, ReporterState, null>({
 				const input = { type: "input", content: report, whenBusy: "followUp" } as const;
 				await main.submit({ ...input, requestId: `subagent-report:${reporter.id}` }, taskContext);
 			}
-			await runtime.commit(
+			await runtime.commitRun(
 				() => ({ status: "terminal", outcome: { status: "completed", result: null } }),
 				taskContext,
 			);
 		},
 	},
 	abort: (_reporter, runtime, taskContext) =>
-		runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), taskContext),
+		runtime.commitAbort(() => ({ status: "terminal", outcome: { status: "aborted" } }), taskContext),
 });
 
 function textOf(message: AssistantMessage | undefined): string {

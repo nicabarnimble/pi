@@ -432,7 +432,7 @@ describe("conversation context", () => {
 			phases: {
 				run: async (_task, runtime, taskContext) => {
 					const write = (draft: EntryDraft) =>
-						runtime.commit(async (tx) => {
+						runtime.commitRun(async (tx) => {
 							await tx.appendEntry(root.id, draft);
 							return undefined;
 						}, taskContext);
@@ -470,14 +470,14 @@ describe("conversation context", () => {
 					expect(reset.view).toEqual(await root.context(taskContext));
 					expect(reset.view.messages.map(describeMessage)).toEqual(["user:fresh"]);
 
-					await runtime.commit(
+					await runtime.commitRun(
 						() => ({ status: "terminal", outcome: { status: "completed", result: null } }),
 						taskContext,
 					);
 				},
 			},
 			abort: async (_task, runtime, taskContext) => {
-				await runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), taskContext);
+				await runtime.commitAbort(() => ({ status: "terminal", outcome: { status: "aborted" } }), taskContext);
 			},
 		});
 		addTask(registry, Reads);
@@ -507,16 +507,16 @@ describe("conversation context", () => {
 			initial: () => ({ phase: "run" }),
 			phases: {
 				run: async (_task, runtime, taskContext) => {
-					await runtime.commit(async (tx) => {
+					await runtime.commitRun(async (tx) => {
 						await tx.appendEntry(root.id, { kind: "message", model: [user("from child")] });
 						return undefined;
 					}, taskContext);
 					await read("child", () => runtime.context(root.id, taskContext), taskContext);
-					await runtime.commit(() => DONE, taskContext);
+					await runtime.commitRun(() => DONE, taskContext);
 				},
 			},
 			abort: async (_task, runtime, taskContext) => {
-				await runtime.commit(() => ABORTED, taskContext);
+				await runtime.commitAbort(() => ABORTED, taskContext);
 			},
 		});
 		const Parent = defineTask<Record<string, never>, { phase: "start" } | { phase: "after" }, null>({
@@ -526,7 +526,7 @@ describe("conversation context", () => {
 			phases: {
 				start: async (_task, runtime, taskContext) => {
 					await read("parent", () => runtime.context(root.id, taskContext), taskContext);
-					await runtime.commit(async (tx) => {
+					await runtime.commitRun(async (tx) => {
 						const child = await tx.createTask(
 							Child,
 							{},
@@ -537,11 +537,11 @@ describe("conversation context", () => {
 				},
 				after: async (_task, runtime, taskContext) => {
 					await read("after", () => runtime.context(root.id, taskContext), taskContext);
-					await runtime.commit(() => DONE, taskContext);
+					await runtime.commitRun(() => DONE, taskContext);
 				},
 			},
 			abort: async (_task, runtime, taskContext) => {
-				await runtime.commit(() => ABORTED, taskContext);
+				await runtime.commitAbort(() => ABORTED, taskContext);
 			},
 		});
 		const Probe = probeTask(read);
@@ -634,7 +634,7 @@ describe("conversation context", () => {
 						return { kind: "message", model: [user(`u${next++}`)] };
 					};
 					const append = (conversationId: typeof root.id) =>
-						runtime.commit(async (tx) => {
+						runtime.commitRun(async (tx) => {
 							const added = 1 + random(3);
 							for (let index = 0; index < added; index++) {
 								written.push(await tx.appendEntry(conversationId, draft()));
@@ -675,11 +675,11 @@ describe("conversation context", () => {
 						expect(await runtime.context(fork.id, taskContext)).toEqual(await fork.context(taskContext));
 						await append(fork.id);
 					}
-					await runtime.commit(() => DONE, taskContext);
+					await runtime.commitRun(() => DONE, taskContext);
 				},
 			},
 			abort: async (_task, runtime, taskContext) => {
-				await runtime.commit(() => ABORTED, taskContext);
+				await runtime.commitAbort(() => ABORTED, taskContext);
 			},
 		});
 		addTask(registry, Steps);
@@ -716,7 +716,7 @@ describe("conversation context", () => {
 			phases: {
 				run: async (_task, runtime, taskContext) => {
 					const append = (conversationId: typeof root.id, draft: EntryDraft) =>
-						runtime.commit(async (tx) => {
+						runtime.commitRun(async (tx) => {
 							await tx.appendEntry(conversationId, draft);
 							return undefined;
 						}, taskContext);
@@ -750,7 +750,7 @@ describe("conversation context", () => {
 					const omitted = await root.fork(first.id, { ownership: { kind: "ownerless" } }, taskContext);
 					await append(omitted.id, { kind: "message", model: [assistant("answer")] });
 					let host: EntryRecord | undefined;
-					await runtime.commit(async (tx) => {
+					await runtime.commitRun(async (tx) => {
 						host = await tx.appendEntry(omitted.id, {
 							kind: "host.system",
 							model: [system({ legacy: "Legacy." })],
@@ -773,11 +773,11 @@ describe("conversation context", () => {
 					read2 = await read(empty);
 					expect(read2.rows).toBe(2);
 					expect(read2.messages).toEqual(["user:first", "assistant:answer", "system:s"]);
-					await runtime.commit(() => DONE, taskContext);
+					await runtime.commitRun(() => DONE, taskContext);
 				},
 			},
 			abort: async (_task, runtime, taskContext) => {
-				await runtime.commit(() => ABORTED, taskContext);
+				await runtime.commitAbort(() => ABORTED, taskContext);
 			},
 		});
 		addTask(registry, Steps);
@@ -806,11 +806,11 @@ describe("conversation context", () => {
 						(view.contributions[0]![0] as { content: unknown }).content = "changed";
 					}).toThrow(TypeError);
 					expect(await runtime.context(root.id, taskContext)).toEqual(await root.context(taskContext));
-					await runtime.commit(() => DONE, taskContext);
+					await runtime.commitRun(() => DONE, taskContext);
 				},
 			},
 			abort: async (_task, runtime, taskContext) => {
-				await runtime.commit(() => ABORTED, taskContext);
+				await runtime.commitAbort(() => ABORTED, taskContext);
 			},
 		});
 		addTask(registry, Mutate);
@@ -852,11 +852,11 @@ describe("conversation context", () => {
 					expect(() => {
 						(view.messages[0] as { content: unknown }).content = "changed";
 					}).toThrow(TypeError);
-					await runtime.commit(() => DONE, taskContext);
+					await runtime.commitRun(() => DONE, taskContext);
 				},
 			},
 			abort: async (_task, runtime, taskContext) => {
-				await runtime.commit(() => ABORTED, taskContext);
+				await runtime.commitAbort(() => ABORTED, taskContext);
 			},
 		});
 		addTask(registry, Mutate);
@@ -882,11 +882,11 @@ describe("conversation context", () => {
 				run: async (_task, runtime, taskContext) => {
 					hold.scan = scans.promise;
 					late = runtime.context(root.id, taskContext).catch((error: unknown) => error);
-					await runtime.commit(() => DONE, taskContext);
+					await runtime.commitRun(() => DONE, taskContext);
 				},
 			},
 			abort: async (_task, runtime, taskContext) => {
-				await runtime.commit(() => ABORTED, taskContext);
+				await runtime.commitAbort(() => ABORTED, taskContext);
 			},
 		});
 		const rows: Record<string, number> = {};
@@ -972,11 +972,11 @@ function probeTask(read: (name: string, load: () => Promise<ContextView>, taskCo
 		phases: {
 			run: async (task, runtime, taskContext) => {
 				await read(task.input.name, () => runtime.context(runtime.conversationId, taskContext), taskContext);
-				await runtime.commit(() => DONE, taskContext);
+				await runtime.commitRun(() => DONE, taskContext);
 			},
 		},
 		abort: async (_task, runtime, taskContext) => {
-			await runtime.commit(() => ABORTED, taskContext);
+			await runtime.commitAbort(() => ABORTED, taskContext);
 		},
 	});
 }

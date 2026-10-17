@@ -1552,14 +1552,14 @@ function defineChildTask(gate: Deferred) {
 		phases: {
 			run: async (_task, runtime, taskContext) => {
 				await gate.promise;
-				await runtime.commit(
+				await runtime.commitRun(
 					() => ({ status: "terminal", outcome: { status: "completed", result: null } }),
 					taskContext,
 				);
 			},
 		},
 		abort: async (_task, runtime, taskContext) => {
-			await runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), taskContext);
+			await runtime.commitAbort(() => ({ status: "terminal", outcome: { status: "aborted" } }), taskContext);
 		},
 	});
 }

@@ -141,11 +141,39 @@ export type RunningTask<I, S, R> = TaskRecord<I, S, R> & {
 /**
  * Next state a task commits for itself: a replacement checkpoint, a wait, or its outcome. A returned `terminal` state is
  * stored as `completing` while ordinary owned work below the task is live (spec §5.5).
+ *
+ * Callers pass `RunNextTaskState` to `commitRun()` or `AbortNextTaskState` to `commitAbort()`. This union is what
+ * storage accepts from either method, so the completing rewrite applies to both.
  */
 export type NextTaskState<S, R> = Extract<TaskState<S, R>, { readonly status: "running" | "waiting" | "terminal" }>;
 
+/** Outcome a run invocation may commit. An abort handler commits `AbortTaskOutcome` through `commitAbort()`. */
+export type RunTaskOutcome<R> = Exclude<TaskOutcome<R>, { readonly status: "aborted" }>;
+
+/** Outcome an abort invocation may commit. */
+export type AbortTaskOutcome<R> = Extract<TaskOutcome<R>, { readonly status: "aborted" }>;
+
 /**
- * Runs one checkpoint phase. It must commit a changed checkpoint or a terminal outcome through `runtime.commit()`;
+ * Next state `commitRun()` accepts: a replacement checkpoint, a wait, or a non-abort outcome. A returned `terminal`
+ * state is stored as `completing` while ordinary owned work below the task is live (spec §5.5).
+ */
+export type RunNextTaskState<S, R> =
+	| Extract<TaskState<S, R>, { readonly status: "running" | "waiting" }>
+	| {
+			readonly status: "terminal";
+			readonly checkpoint?: never;
+			readonly outcome: RunTaskOutcome<R>;
+	  };
+
+/** Next state `commitAbort()` accepts: a terminal `aborted` outcome. Returning nothing leaves the state unchanged. */
+export type AbortNextTaskState<R> = {
+	readonly status: "terminal";
+	readonly checkpoint?: never;
+	readonly outcome: AbortTaskOutcome<R>;
+};
+
+/**
+ * Runs one checkpoint phase. It must commit a changed checkpoint or a non-abort outcome through `runtime.commitRun()`;
  * returning without durable progress faults the task.
  */
 export type PhaseHandler<I, P, S, R, H extends object> = (
@@ -189,16 +217,32 @@ export interface TaskRuntime<I, S, R, H extends object> extends DocumentObserver
 	readonly hooks: HookRunner<H>;
 
 	/**
-	 * Commit on the Session line after rereading the task. Rejects when the task is terminal, the invocation ended, the
-	 * Harness is closing, or, in a run invocation, the task carries an abort mark. A returned state replaces the task's
-	 * state in the same commit; returning nothing leaves it unchanged. `tx.createTask()` defaults to the task's
-	 * conversation. Inside the callback read only through `tx`: `snapshot()`, `documentState()`, `watchDoc()`, `getTask()`, and the other Session and runtime reads may queue on the line the callback holds, and then never resolve.
+	 * Commit on the Session line after rereading the task, from a run invocation. Rejects when the task is terminal, the
+	 * invocation ended, the Harness is closing, or the task carries an abort mark. A returned state replaces the task's
+	 * state in the same commit; returning nothing leaves it unchanged. A returned `terminal` state is stored as
+	 * `completing` while ordinary owned work is live. `tx.createTask()` defaults to the task's conversation. Inside the
+	 * callback read only through `tx`: `snapshot()`, `documentState()`, `watchDoc()`, `getTask()`, and the other Session
+	 * and runtime reads may queue on the line the callback holds, and then never resolve.
+	 *
+	 * The callback cannot return an `aborted` outcome. An abort handler commits that with `commitAbort()`.
 	 */
-	commit(
+	commitRun(
 		change: (
 			tx: Tx,
 			current: RunningTask<I, S, R>,
-		) => NextTaskState<S, R> | undefined | Promise<NextTaskState<S, R> | undefined>,
+		) => RunNextTaskState<S, R> | undefined | Promise<RunNextTaskState<S, R> | undefined>,
+		context: Context,
+	): Promise<void>;
+	/**
+	 * Commit on the Session line after rereading the task, from an abort invocation. Same gate and storage as
+	 * `commitRun()`: a returned `terminal` state is stored as `completing` while ordinary owned work is live, and
+	 * returning nothing leaves the state unchanged. The callback may return only a terminal `aborted` outcome.
+	 */
+	commitAbort(
+		change: (
+			tx: Tx,
+			current: RunningTask<I, S, R>,
+		) => AbortNextTaskState<R> | undefined | Promise<AbortNextTaskState<R> | undefined>,
 		context: Context,
 	): Promise<void>;
 	/** Read a durable memo of this task. */
@@ -252,7 +296,7 @@ export type TaskDefinition<I, S extends { phase: string }, R, H extends object> 
 	readonly phases: {
 		readonly [P in S["phase"]]: PhaseHandler<I, Extract<S, { phase: P }>, S, R, H>;
 	};
-	/** Runs in a fresh invocation after an abort mark and must commit a terminal outcome. */
+	/** Runs in a fresh invocation after an abort mark and must commit an aborted outcome through `runtime.commitAbort()`. */
 	abort(task: RunningTask<I, S, R>, runtime: TaskRuntime<I, S, R, H>, context: Context): Promise<void>;
 	/** Convert a record stored by any older supported version; runs at reservation. */
 	migrate?(

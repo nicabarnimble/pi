@@ -23,8 +23,8 @@ import {
 	type JoinPolicy,
 	LiveDoc,
 	MemoryStorage,
-	type NextTaskState,
 	type Registry,
+	type RunNextTaskState,
 	type Storage,
 	type TaskId,
 	type TaskOptions,
@@ -46,7 +46,7 @@ import { aborted, type Deferred, deferred, openTasks, settled } from "./task-sup
 type NodeInput = { name: string };
 type NodeCheckpoint = { phase: "run" } | { phase: "resume"; round: number };
 type NodeRuntime = TaskRuntime<NodeInput, NodeCheckpoint, string, object>;
-type Next = NextTaskState<NodeCheckpoint, string>;
+type Next = RunNextTaskState<NodeCheckpoint, string>;
 
 /** Per-name behavior of `Node`; unscripted parts use the defaults below. */
 type Behavior = {
@@ -84,7 +84,7 @@ function script(name: string, behavior: Behavior): void {
 async function defaultRun(runtime: NodeRuntime, ctx: Context, name: string): Promise<void> {
 	const ending = await Promise.race([gate(name).promise, aborted(runtime.signal)]);
 	if (ending === "throw") throw new Error(`${name} threw`);
-	await runtime.commit(() => end(ending, name), ctx);
+	await runtime.commitRun(() => end(ending, name), ctx);
 }
 
 function end(ending: "completed" | "failed", name: string): Next {
@@ -110,7 +110,7 @@ const Node = defineTask<NodeInput, NodeCheckpoint, string>({
 			log.push(`resume:${name}`);
 			const behavior = behaviors.get(name)?.resume;
 			if (behavior !== undefined) return behavior(runtime, ctx, task.state.checkpoint.round);
-			await runtime.commit(() => end("completed", name), ctx);
+			await runtime.commitRun(() => end("completed", name), ctx);
 		},
 	},
 	abort: async (task, runtime, ctx) => {
@@ -118,7 +118,7 @@ const Node = defineTask<NodeInput, NodeCheckpoint, string>({
 		log.push(`abort:${name}`);
 		const behavior = behaviors.get(name)?.abort;
 		if (behavior !== undefined) return behavior(runtime, ctx);
-		await runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted", result: name } }), ctx);
+		await runtime.commitAbort(() => ({ status: "terminal", outcome: { status: "aborted", result: name } }), ctx);
 	},
 });
 
@@ -203,7 +203,7 @@ describe("task ownership", () => {
 		let child: TaskId | undefined;
 		script("parent", {
 			run: (runtime, ctx) =>
-				runtime.commit(async (tx) => {
+				runtime.commitRun(async (tx) => {
 					child = await spawn(tx, runtime.taskId, "child");
 					return waitOn([child], "allSettled");
 				}, ctx),
@@ -241,7 +241,7 @@ describe("task ownership", () => {
 		const { harness, root } = await openNodes();
 		script("parent", {
 			run: async (runtime, ctx) => {
-				await runtime.commit(async (tx) => {
+				await runtime.commitRun(async (tx) => {
 					await spawn(tx, runtime.taskId, "child");
 					return { status: "running", checkpoint: { phase: "resume", round: 1 } };
 				}, ctx);
@@ -262,7 +262,7 @@ describe("task ownership", () => {
 		script("slow", {
 			abort: async (runtime, ctx) => {
 				await gate("abort.slow").promise;
-				await runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), ctx);
+				await runtime.commitAbort(() => ({ status: "terminal", outcome: { status: "aborted" } }), ctx);
 			},
 		});
 		const slow = await start(root, "slow");
@@ -278,7 +278,7 @@ describe("task ownership", () => {
 		const { harness, root } = await openNodes();
 		script("eager", {
 			run: (runtime, ctx) =>
-				runtime.commit(async (tx) => {
+				runtime.commitRun(async (tx) => {
 					await spawn(tx, runtime.taskId, "never");
 					return end("completed", "eager");
 				}, ctx),
@@ -295,12 +295,12 @@ describe("task ownership", () => {
 		let child: ConversationId | undefined;
 		script("host", {
 			run: (runtime, ctx) =>
-				runtime.commit(async (tx) => {
+				runtime.commitRun(async (tx) => {
 					child = (await tx.createConversation({ ownership: { kind: "task", taskId: runtime.taskId } })).id;
 					return { status: "running", checkpoint: { phase: "resume", round: 1 } };
 				}, ctx),
 			resume: (runtime, ctx) =>
-				runtime.commit(async (tx) => {
+				runtime.commitRun(async (tx) => {
 					await tx.createTask(Node, { name: "inner" }, { ...OWN_CONVERSATION, conversationId: child! });
 					return end("completed", "host");
 				}, ctx),
@@ -321,13 +321,13 @@ function parentOf(parent: string, children: readonly string[], policy: JoinPolic
 	const found = { ids: [] as TaskId<string>[], outcomes: [] as string[] };
 	script(parent, {
 		run: (runtime, ctx) =>
-			runtime.commit(async (tx) => {
+			runtime.commitRun(async (tx) => {
 				for (const name of children) found.ids.push(await spawn(tx, runtime.taskId, name));
 				return waitOn(found.ids, policy);
 			}, ctx),
 		resume: async (runtime, ctx) => {
 			found.outcomes = (await runtime.outcomes(found.ids, ctx)).map((outcome) => outcome.status);
-			await runtime.commit(() => end("completed", parent), ctx);
+			await runtime.commitRun(() => end("completed", parent), ctx);
 		},
 	});
 	return found;
@@ -339,7 +339,7 @@ describe("waiting", () => {
 		const found = { ids: [] as TaskId[], outcomes: [] as string[] };
 		script("parent", {
 			run: (runtime, ctx) =>
-				runtime.commit(async (tx) => {
+				runtime.commitRun(async (tx) => {
 					for (const name of ["ok", "fails", "throws", "aborted"])
 						found.ids.push(await spawn(tx, runtime.taskId, name));
 					found.ids.push(await tx.createTask(Unregistered, { name: "orphan" }, owned(runtime.taskId)));
@@ -347,7 +347,7 @@ describe("waiting", () => {
 				}, ctx),
 			resume: async (runtime, ctx) => {
 				found.outcomes = (await runtime.outcomes(found.ids, ctx)).map((outcome) => outcome.status);
-				await runtime.commit(() => end("completed", "parent"), ctx);
+				await runtime.commitRun(() => end("completed", "parent"), ctx);
 			},
 		});
 		const parent = await start(root, "parent");
@@ -385,23 +385,23 @@ describe("waiting", () => {
 		const found = { ids: [] as TaskId[] };
 		script("p1", {
 			run: async (runtime, ctx) => {
-				await runtime.commit(async (tx) => {
+				await runtime.commitRun(async (tx) => {
 					await spawn(tx, runtime.taskId, "grandchild");
 					return { status: "running", checkpoint: { phase: "resume", round: 1 } };
 				}, ctx);
 			},
-			resume: (runtime, ctx) => runtime.commit(() => end("failed", "p1"), ctx),
+			resume: (runtime, ctx) => runtime.commitRun(() => end("failed", "p1"), ctx),
 		});
 		script("grandchild", {
 			abort: async (runtime, ctx) => {
 				await gate("abort.grandchild").promise;
-				await runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), ctx);
+				await runtime.commitAbort(() => ({ status: "terminal", outcome: { status: "aborted" } }), ctx);
 			},
 		});
 		let outside: TaskId | undefined;
 		script("parent", {
 			run: (runtime, ctx) =>
-				runtime.commit(async (tx) => {
+				runtime.commitRun(async (tx) => {
 					for (const name of ["p1", "p2"]) found.ids.push(await spawn(tx, runtime.taskId, name));
 					outside = await spawn(tx, runtime.taskId, "outside");
 					return waitOn(found.ids, "failFast");
@@ -443,10 +443,10 @@ describe("waiting", () => {
 		const live = await start(root, "live");
 		let outcomes: string[] = [];
 		script("parent", {
-			run: (runtime, ctx) => runtime.commit(() => waitOn([done, live], "allSettled"), ctx),
+			run: (runtime, ctx) => runtime.commitRun(() => waitOn([done, live], "allSettled"), ctx),
 			resume: async (runtime, ctx) => {
 				outcomes = (await runtime.outcomes([done, live], ctx)).map((outcome) => outcome.status);
-				await runtime.commit(() => end("completed", "parent"), ctx);
+				await runtime.commitRun(() => end("completed", "parent"), ctx);
 			},
 		});
 		const parent = await start(root, "parent");
@@ -467,7 +467,7 @@ describe("waiting", () => {
 			["foreign", () => [other], "failFast", "only on tasks it owns"],
 		];
 		for (const [name, on, policy, message] of cases) {
-			script(name, { run: (runtime, ctx) => runtime.commit(() => waitOn(on(runtime), policy), ctx) });
+			script(name, { run: (runtime, ctx) => runtime.commitRun(() => waitOn(on(runtime), policy), ctx) });
 			const id = await start(root, name);
 			expect((await harness.waitForTask(id, context)).state.outcome).toMatchObject({
 				status: "faulted",
@@ -477,10 +477,10 @@ describe("waiting", () => {
 		// A child waiting on its owner could never resume.
 		let child: TaskId | undefined;
 		let parent: TaskId | undefined;
-		script("child", { run: (runtime, ctx) => runtime.commit(() => waitOn([parent!], "allSettled"), ctx) });
+		script("child", { run: (runtime, ctx) => runtime.commitRun(() => waitOn([parent!], "allSettled"), ctx) });
 		script("parent", {
 			run: (runtime, ctx) =>
-				runtime.commit(async (tx) => {
+				runtime.commitRun(async (tx) => {
 					child = await spawn(tx, runtime.taskId, "child");
 					return waitOn([child], "allSettled");
 				}, ctx),
@@ -500,8 +500,8 @@ describe("waiting", () => {
 		const { harness, root } = await openNodes();
 		let a: TaskId | undefined;
 		let b: TaskId | undefined;
-		script("a", { run: (runtime, ctx) => runtime.commit(() => waitOn([b!], "allSettled"), ctx) });
-		script("b", { run: (runtime, ctx) => runtime.commit(() => waitOn([a!], "allSettled"), ctx) });
+		script("a", { run: (runtime, ctx) => runtime.commitRun(() => waitOn([b!], "allSettled"), ctx) });
+		script("b", { run: (runtime, ctx) => runtime.commitRun(() => waitOn([a!], "allSettled"), ctx) });
 		await root.commit(async (tx) => {
 			a = await tx.createTask(Node, { name: "a" }, OWN_CONVERSATION);
 			b = await tx.createTask(Node, { name: "b" }, OWN_CONVERSATION);
@@ -518,8 +518,8 @@ describe("waiting", () => {
 		let held: TaskId | undefined;
 		let other: TaskId | undefined;
 		const child = spawnAndFinish("held", "child");
-		script("child", { run: (runtime, ctx) => runtime.commit(() => waitOn([other!], "allSettled"), ctx) });
-		script("other", { run: (runtime, ctx) => runtime.commit(() => waitOn([held!], "allSettled"), ctx) });
+		script("child", { run: (runtime, ctx) => runtime.commitRun(() => waitOn([other!], "allSettled"), ctx) });
+		script("other", { run: (runtime, ctx) => runtime.commitRun(() => waitOn([held!], "allSettled"), ctx) });
 		await root.commit(async (tx) => {
 			held = await tx.createTask(Node, { name: "held" }, OWN_CONVERSATION);
 			other = await tx.createTask(Node, { name: "other" }, OWN_CONVERSATION);
@@ -538,8 +538,8 @@ describe("waiting", () => {
 		let other: TaskId | undefined;
 		const child = spawnAndFinish("held", "child");
 		const grandchild = spawnAndFinish("child", "grandchild");
-		script("grandchild", { run: (runtime, ctx) => runtime.commit(() => waitOn([other!], "allSettled"), ctx) });
-		script("other", { run: (runtime, ctx) => runtime.commit(() => waitOn([held!], "allSettled"), ctx) });
+		script("grandchild", { run: (runtime, ctx) => runtime.commitRun(() => waitOn([other!], "allSettled"), ctx) });
+		script("other", { run: (runtime, ctx) => runtime.commitRun(() => waitOn([held!], "allSettled"), ctx) });
 		await root.commit(async (tx) => {
 			held = await tx.createTask(Node, { name: "held" }, OWN_CONVERSATION);
 			other = await tx.createTask(Node, { name: "other" }, OWN_CONVERSATION);
@@ -556,7 +556,7 @@ describe("waiting", () => {
 	it("lets a background task wait on the owner of its conversation", async () => {
 		const { harness, root } = await openNodes();
 		let owner: TaskId | undefined;
-		script("background", { run: (runtime, ctx) => runtime.commit(() => waitOn([owner!], "allSettled"), ctx) });
+		script("background", { run: (runtime, ctx) => runtime.commitRun(() => waitOn([owner!], "allSettled"), ctx) });
 		const background = await root.commit(async (tx) => {
 			owner = await tx.createTask(Node, { name: "owner" }, OWN_CONVERSATION);
 			const conversation = await tx.createConversation({ ownership: { kind: "task", taskId: owner } });
@@ -578,7 +578,7 @@ describe("waiting", () => {
 		// The orchestrator spawns a worker and finishes; the running worker holds it as completing.
 		script("orchestrator", {
 			run: (runtime, ctx) =>
-				runtime.commit(async (tx) => {
+				runtime.commitRun(async (tx) => {
 					ids.worker = await spawn(tx, runtime.taskId, "worker");
 					return { status: "running", checkpoint: { phase: "resume", round: 1 } };
 				}, ctx),
@@ -586,7 +586,7 @@ describe("waiting", () => {
 		// The reviewer waits for the orchestrator's result.
 		script("reviewer", {
 			run: async (runtime, ctx) => {
-				await runtime.commit(() => waitOn([ids.orchestrator!], "allSettled"), ctx);
+				await runtime.commitRun(() => waitOn([ids.orchestrator!], "allSettled"), ctx);
 				reviewerWaits.resolve();
 			},
 		});
@@ -594,7 +594,7 @@ describe("waiting", () => {
 		script("worker", {
 			run: async (runtime, ctx) => {
 				await reviewerWaits.promise;
-				await runtime.commit(() => waitOn([ids.reviewer!], "allSettled"), ctx);
+				await runtime.commitRun(() => waitOn([ids.reviewer!], "allSettled"), ctx);
 			},
 		});
 		ids.orchestrator = await start(root, "orchestrator");
@@ -617,10 +617,10 @@ describe("waiting", () => {
 		const ids: Record<string, TaskId> = {};
 		// A diamond: top waits on left and right, both wait on bottom. No cycle.
 		script("top", {
-			run: (runtime, ctx) => runtime.commit(() => waitOn([ids.left!, ids.right!], "allSettled"), ctx),
+			run: (runtime, ctx) => runtime.commitRun(() => waitOn([ids.left!, ids.right!], "allSettled"), ctx),
 		});
-		script("left", { run: (runtime, ctx) => runtime.commit(() => waitOn([ids.bottom!], "allSettled"), ctx) });
-		script("right", { run: (runtime, ctx) => runtime.commit(() => waitOn([ids.bottom!], "allSettled"), ctx) });
+		script("left", { run: (runtime, ctx) => runtime.commitRun(() => waitOn([ids.bottom!], "allSettled"), ctx) });
+		script("right", { run: (runtime, ctx) => runtime.commitRun(() => waitOn([ids.bottom!], "allSettled"), ctx) });
 		await root.commit(async (tx) => {
 			ids.bottom = await tx.createTask(Node, { name: "bottom" }, OWN_CONVERSATION);
 			ids.left = await tx.createTask(Node, { name: "left" }, OWN_CONVERSATION);
@@ -640,7 +640,7 @@ describe("waiting", () => {
 		// b owns c and waits on a; aborting b leaves c's cleanup pending, so b waits only for c.
 		script("b", {
 			run: (runtime, ctx) =>
-				runtime.commit(async (tx) => {
+				runtime.commitRun(async (tx) => {
 					ids.c = await spawn(tx, runtime.taskId, "c");
 					return waitOn([ids.a!], "allSettled");
 				}, ctx),
@@ -648,16 +648,16 @@ describe("waiting", () => {
 		script("c", {
 			abort: async (runtime, ctx) => {
 				await cleanup.promise;
-				await runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted", result: "c" } }), ctx);
+				await runtime.commitAbort(() => ({ status: "terminal", outcome: { status: "aborted", result: "c" } }), ctx);
 			},
 		});
 		const aWaits = deferred();
 		script("a", {
 			run: async (runtime, ctx) => {
 				await aWaits.promise;
-				await runtime.commit(() => waitOn([ids.b!], "allSettled"), ctx);
+				await runtime.commitRun(() => waitOn([ids.b!], "allSettled"), ctx);
 			},
-			resume: (runtime, ctx) => runtime.commit(() => end("completed", "a"), ctx),
+			resume: (runtime, ctx) => runtime.commitRun(() => end("completed", "a"), ctx),
 		});
 		await root.commit(async (tx) => {
 			ids.a = await tx.createTask(Node, { name: "a" }, OWN_CONVERSATION);
@@ -682,7 +682,7 @@ describe("waiting", () => {
 		const names = ["x", "y", "z"];
 		for (const [index, name] of names.entries()) {
 			const next = names[(index + 1) % names.length]!;
-			script(name, { run: (runtime, ctx) => runtime.commit(() => waitOn([ids[next]!], "allSettled"), ctx) });
+			script(name, { run: (runtime, ctx) => runtime.commitRun(() => waitOn([ids[next]!], "allSettled"), ctx) });
 		}
 		await root.commit(async (tx) => {
 			for (const name of names) ids[name] = await tx.createTask(Node, { name }, OWN_CONVERSATION);
@@ -695,7 +695,7 @@ describe("waiting", () => {
 
 	it("resumes at the next pass when it waits on nothing", async () => {
 		const { harness, root } = await openNodes();
-		script("parent", { run: (runtime, ctx) => runtime.commit(() => waitOn([], "failFast"), ctx) });
+		script("parent", { run: (runtime, ctx) => runtime.commitRun(() => waitOn([], "failFast"), ctx) });
 		expect(await outcomeOf(harness, await start(root, "parent"))).toBe("completed");
 		expect(log).toEqual(["run:parent", "resume:parent"]);
 		await harness.close(context);
@@ -706,16 +706,16 @@ describe("waiting", () => {
 		const ids: TaskId[] = [];
 		script("parent", {
 			run: async (runtime, ctx) => {
-				await runtime.commit(async (tx) => {
+				await runtime.commitRun(async (tx) => {
 					for (const name of ["a", "b", "c"]) ids.push(await spawn(tx, runtime.taskId, name));
 					return { status: "running", checkpoint: { phase: "resume", round: 0 } };
 				}, ctx);
 			},
 			resume: async (runtime, ctx, round) => {
 				log.push(`round:${round}`);
-				if (round === 0) return runtime.commit(() => waitOn([ids[0]!], "allSettled", 1), ctx);
-				if (round === 1) return runtime.commit(() => waitOn([ids[1]!, ids[2]!], "failFast", 2), ctx);
-				await runtime.commit(() => end("completed", "parent"), ctx);
+				if (round === 0) return runtime.commitRun(() => waitOn([ids[0]!], "allSettled", 1), ctx);
+				if (round === 1) return runtime.commitRun(() => waitOn([ids[1]!, ids[2]!], "failFast", 2), ctx);
+				await runtime.commitRun(() => end("completed", "parent"), ctx);
 			},
 		});
 		const parent = await start(root, "parent");
@@ -741,7 +741,7 @@ describe("completing", () => {
 		let child: TaskId | undefined;
 		script("parent", {
 			run: async (runtime, ctx) => {
-				await runtime.commit(async (tx) => {
+				await runtime.commitRun(async (tx) => {
 					(await tx.doc(TaskNotes, runtime.taskId)).text = "notes";
 					child = await spawn(tx, runtime.taskId, "child");
 					return { status: "running", checkpoint: { phase: "resume", round: 1 } };
@@ -774,7 +774,7 @@ describe("completing", () => {
 		let conversation: ConversationId | undefined;
 		script("parent", {
 			run: async (runtime, ctx) => {
-				await runtime.commit(async (tx) => {
+				await runtime.commitRun(async (tx) => {
 					conversation = (await tx.createConversation({ ownership: { kind: "task", taskId: runtime.taskId } })).id;
 					await tx.createTask(Node, { name: "first" }, { ...OWN_CONVERSATION, conversationId: conversation });
 					return { status: "running", checkpoint: { phase: "resume", round: 1 } };
@@ -802,14 +802,14 @@ describe("completing", () => {
 			let child: TaskId | undefined;
 			script("parent", {
 				run: async (runtime, ctx) => {
-					await runtime.commit(async (tx) => {
+					await runtime.commitRun(async (tx) => {
 						child = await spawn(tx, runtime.taskId, "child");
 						return { status: "running", checkpoint: { phase: "resume", round: 1 } };
 					}, ctx);
 				},
 				resume: async (runtime, ctx) => {
 					if (ending === "throw") throw new Error("parent threw");
-					await runtime.commit(() => end("failed", "parent"), ctx);
+					await runtime.commitRun(() => end("failed", "parent"), ctx);
 				},
 			});
 			const parent = await start(root, "parent");
@@ -825,7 +825,7 @@ describe("completing", () => {
 		let child: TaskId | undefined;
 		script("parent", {
 			run: async (runtime, ctx) => {
-				await runtime.commit(async (tx) => {
+				await runtime.commitRun(async (tx) => {
 					child = await spawn(tx, runtime.taskId, "child");
 					return { status: "running", checkpoint: { phase: "resume", round: 1 } };
 				}, ctx);
@@ -852,13 +852,13 @@ describe("abort order", () => {
 		const found: { id?: TaskId } = {};
 		script(name, {
 			run: (runtime, ctx) =>
-				runtime.commit(async (tx) => {
+				runtime.commitRun(async (tx) => {
 					found.id = await spawn(tx, runtime.taskId, child);
 					return waitOn([found.id], "allSettled");
 				}, ctx),
 			abort: async (runtime, ctx) => {
 				log.push(`${name} saw ${(await harness().getTask(found.id!, context))!.state.status}`);
-				await runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), ctx);
+				await runtime.commitAbort(() => ({ status: "terminal", outcome: { status: "aborted" } }), ctx);
 			},
 		});
 		return found;
@@ -889,7 +889,7 @@ describe("abort order", () => {
 	it("does not wait for a task it waits on but does not own", async () => {
 		const { harness, root } = await openNodes();
 		const other = await start(root, "other");
-		script("parent", { run: (runtime, ctx) => runtime.commit(() => waitOn([other], "allSettled"), ctx) });
+		script("parent", { run: (runtime, ctx) => runtime.commitRun(() => waitOn([other], "allSettled"), ctx) });
 		const parent = await start(root, "parent");
 		await until(async () => (await state(harness, parent)).status === "waiting");
 		await harness.abortTask(parent, context);
@@ -905,12 +905,12 @@ describe("abort order", () => {
 		script("child", {
 			abort: async (runtime, ctx) => {
 				await gate("abort.child").promise;
-				await runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), ctx);
+				await runtime.commitAbort(() => ({ status: "terminal", outcome: { status: "aborted" } }), ctx);
 			},
 		});
 		script("parent", {
 			run: (runtime, ctx) =>
-				runtime.commit(async (tx) => {
+				runtime.commitRun(async (tx) => {
 					child = await spawn(tx, runtime.taskId, "child");
 					return waitOn([child], "allSettled");
 				}, ctx),
@@ -928,7 +928,7 @@ describe("abort order", () => {
 
 	it("faults an abort handler that tries to wait", async () => {
 		const { harness, root } = await openNodes();
-		script("parent", { abort: (runtime, ctx) => runtime.commit(() => waitOn([], "allSettled"), ctx) });
+		script("parent", { abort: (runtime, ctx) => runtime.commitRun(() => waitOn([], "allSettled"), ctx) });
 		const parent = await start(root, "parent");
 		await until(() => log.includes("run:parent"));
 		await harness.abortTask(parent, context);
@@ -961,14 +961,14 @@ describe("abort order", () => {
 		let x: TaskId | undefined;
 		script("a", {
 			run: (runtime, ctx) =>
-				runtime.commit(async (tx) => {
+				runtime.commitRun(async (tx) => {
 					b = await spawn(tx, runtime.taskId, "b");
 					return waitOn([b], "allSettled");
 				}, ctx),
 		});
 		script("b", {
 			run: async (runtime, ctx) => {
-				await runtime.commit(async (tx) => {
+				await runtime.commitRun(async (tx) => {
 					const conversation = await tx.createConversation({
 						ownership: { kind: "task", taskId: runtime.taskId },
 					});
@@ -1000,7 +1000,7 @@ describe("boundaries", () => {
 		let below: TaskId | undefined;
 		script("background", {
 			run: async (runtime, ctx) => {
-				await runtime.commit(async (tx) => {
+				await runtime.commitRun(async (tx) => {
 					child = await spawn(tx, runtime.taskId, "child");
 					const conversation = await tx.createConversation({
 						ownership: { kind: "task", taskId: runtime.taskId },
@@ -1029,7 +1029,7 @@ describe("boundaries", () => {
 		let conversation: ConversationId | undefined;
 		script("agent", {
 			run: async (runtime, ctx) => {
-				await runtime.commit(async (tx) => {
+				await runtime.commitRun(async (tx) => {
 					conversation = (await tx.createConversation({ ownership: { kind: "task", taskId: runtime.taskId } })).id;
 					return { status: "running", checkpoint: { phase: "resume", round: 1 } };
 				}, ctx);
@@ -1346,7 +1346,7 @@ describe("tool rounds", () => {
 		script("hooked", {
 			abort: async (runtime, ctx) => {
 				await gate("abort.hooked").promise;
-				await runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), ctx);
+				await runtime.commitAbort(() => ({ status: "terminal", outcome: { status: "aborted" } }), ctx);
 			},
 		});
 		let reject: TaskId | undefined;
@@ -1419,17 +1419,17 @@ function versioned(version: 1 | 2) {
 		initial: () => ({ phase: "wait" }),
 		phases: {
 			wait: (task, runtime, ctx) =>
-				runtime.commit(
+				runtime.commitRun(
 					() => ({ status: "waiting", checkpoint: { phase: "resume" }, on: task.input.on, policy: "allSettled" }),
 					ctx,
 				),
 			resume: (_task, runtime, ctx) =>
-				runtime.commit(() => ({ status: "terminal", outcome: { status: "completed", result: "v1" } }), ctx),
+				runtime.commitRun(() => ({ status: "terminal", outcome: { status: "completed", result: "v1" } }), ctx),
 			migrated: (_task, runtime, ctx) =>
-				runtime.commit(() => ({ status: "terminal", outcome: { status: "completed", result: "v2" } }), ctx),
+				runtime.commitRun(() => ({ status: "terminal", outcome: { status: "completed", result: "v2" } }), ctx),
 		},
 		abort: (_task, runtime, ctx) =>
-			runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), ctx),
+			runtime.commitAbort(() => ({ status: "terminal", outcome: { status: "aborted" } }), ctx),
 		...(version === 2
 			? {
 					migrate: (input: unknown) => ({
@@ -1446,7 +1446,7 @@ function spawnAndFinish(name: string, child: string): { id?: TaskId } {
 	const found: { id?: TaskId } = {};
 	script(name, {
 		run: async (runtime, ctx) => {
-			await runtime.commit(async (tx) => {
+			await runtime.commitRun(async (tx) => {
 				found.id = await spawn(tx, runtime.taskId, child);
 				return { status: "running", checkpoint: { phase: "resume", round: 1 } };
 			}, ctx);
@@ -1497,18 +1497,18 @@ describe("definitions and waits", () => {
 				initial: () => ({ phase: "run" }),
 				phases: {
 					run: async (task, runtime, ctx) => {
-						await runtime.commit(async (tx) => {
+						await runtime.commitRun(async (tx) => {
 							await spawn(tx, task.id, "child");
 							return undefined;
 						}, ctx);
-						await runtime.commit(
+						await runtime.commitRun(
 							() => ({ status: "terminal", outcome: { status: "completed", result: "held" } }),
 							ctx,
 						);
 					},
 				},
 				abort: (_task, runtime, ctx) =>
-					runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), ctx),
+					runtime.commitAbort(() => ({ status: "terminal", outcome: { status: "aborted" } }), ctx),
 				migrate: () => {
 					throw new Error("never migrates");
 				},
@@ -1538,7 +1538,7 @@ describe("definitions and waits", () => {
 					() => "resolved",
 					(error: Error) => error.message,
 				);
-				await runtime.commit(() => waitOn([held], "allSettled"), ctx);
+				await runtime.commitRun(() => waitOn([held], "allSettled"), ctx);
 			},
 		});
 		const reader = await start(root, "reader");
@@ -1570,7 +1570,7 @@ describe("conversation abort and boundaries", () => {
 		script("first", {
 			abort: async (runtime, ctx) => {
 				await gate("abort.first").promise;
-				await runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), ctx);
+				await runtime.commitAbort(() => ({ status: "terminal", outcome: { status: "aborted" } }), ctx);
 			},
 		});
 		const background = { ...OWN_CONVERSATION, background: true };
@@ -1592,7 +1592,7 @@ describe("conversation abort and boundaries", () => {
 		script("owner", {
 			abort: async (runtime, ctx) => {
 				await gate("abort.owner").promise;
-				await runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), ctx);
+				await runtime.commitAbort(() => ({ status: "terminal", outcome: { status: "aborted" } }), ctx);
 			},
 		});
 		const tree = await root.commit(async (tx) => {
@@ -1694,7 +1694,7 @@ describe("recovery through ownership edges", () => {
 		let inner: TaskId | undefined;
 		script("child", {
 			run: async (runtime, ctx) => {
-				await runtime.commit(async (tx) => {
+				await runtime.commitRun(async (tx) => {
 					const conversation = await tx.createConversation({
 						ownership: { kind: "task", taskId: runtime.taskId },
 					});
@@ -1727,7 +1727,7 @@ describe("recovery through ownership edges", () => {
 		let conversation: ConversationId | undefined;
 		script("child", {
 			run: async (runtime, ctx) => {
-				await runtime.commit(async (tx) => {
+				await runtime.commitRun(async (tx) => {
 					conversation = (await tx.createConversation({ ownership: { kind: "task", taskId: runtime.taskId } })).id;
 					return { status: "running", checkpoint: { phase: "resume", round: 1 } };
 				}, ctx);
@@ -1878,7 +1878,7 @@ describe("tool rounds and events", () => {
 		script("held", {
 			abort: async (runtime, ctx) => {
 				await gate("abort.held").promise;
-				await runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), ctx);
+				await runtime.commitAbort(() => ({ status: "terminal", outcome: { status: "aborted" } }), ctx);
 			},
 		});
 		addTool(

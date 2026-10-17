@@ -18,12 +18,12 @@ const Payment = defineTask<{ amount: number }, PaymentState, { receipt: number }
 	name: "example.payment",
 	version: 1,
 	initial: () => ({ phase: "prepare" }),
-	// One handler per phase. Each must save progress through runtime.commit():
+	// One handler per phase. Each must save progress through runtime.commitRun():
 	// its callback returns the next checkpoint or the final outcome, and that
 	// state is saved in the same commit as everything else the callback wrote.
 	phases: {
 		prepare: async (task, runtime, taskContext) => {
-			await runtime.commit(
+			await runtime.commitRun(
 				() => ({ status: "running", checkpoint: { phase: "charge", key: `payment-${task.id}` } }),
 				taskContext,
 			);
@@ -32,7 +32,7 @@ const Payment = defineTask<{ amount: number }, PaymentState, { receipt: number }
 			const key = task.state.checkpoint.key;
 			if (!payments.has(key)) payments.set(key, task.input.amount * 100);
 			const receipt = payments.get(key)!;
-			await runtime.commit(
+			await runtime.commitRun(
 				() => ({ status: "terminal", outcome: { status: "completed", result: { receipt } } }),
 				taskContext,
 			);
@@ -40,7 +40,7 @@ const Payment = defineTask<{ amount: number }, PaymentState, { receipt: number }
 	},
 	// Runs instead of the phases after harness.abortTask(); it decides the outcome.
 	abort: async (_task, runtime, taskContext) => {
-		await runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), taskContext);
+		await runtime.commitAbort(() => ({ status: "terminal", outcome: { status: "aborted" } }), taskContext);
 	},
 });
 

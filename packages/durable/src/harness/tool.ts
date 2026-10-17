@@ -160,7 +160,7 @@ export const ToolTask = defineTask<ToolTaskInput, ToolTaskCheckpoint, ToolTaskRe
 				return settle(runtime, task.input, call, COMPLETED, () => invalid(validated.error), context);
 			// Strict JSON: repair may set optional properties to undefined, which the slot and checkpoint cannot hold.
 			const final = copyJson(validated.args, { omitUndefinedProperties: true }) as JsonObject;
-			await runtime.commit(async (tx) => {
+			await runtime.commitRun(async (tx) => {
 				const slot = toolSlot(await tx.doc(LiveDoc, runtime.conversationId), runtime.taskId);
 				if (slot !== undefined) slot.status = "running";
 				// A nested slot shows the arguments the call runs with, which repair, hooks, and coercion may have changed.
@@ -179,7 +179,7 @@ export const ToolTask = defineTask<ToolTaskInput, ToolTaskCheckpoint, ToolTaskRe
 			const tool = await resolveTool(runtime, task.input, call.name, context);
 			if (replay === "safe" && tool?.replay === "safe") {
 				// The rerun reports from scratch; clear what the interrupted attempt published.
-				await runtime.commit(async (tx) => {
+				await runtime.commitRun(async (tx) => {
 					const slot = toolSlot(await tx.doc(LiveDoc, runtime.conversationId), runtime.taskId);
 					if (slot !== undefined) clearProgress(slot);
 					return undefined;
@@ -344,7 +344,7 @@ async function run(
 		},
 		commit: async (change, commitContext) => {
 			let result: Awaited<ReturnType<typeof change>> | undefined;
-			await runtime.commit(async (tx) => {
+			await runtime.commitRun(async (tx) => {
 				result = await change(tx);
 				return undefined;
 			}, commitContext);
@@ -359,7 +359,7 @@ async function run(
 		): Promise<TaskId<R>> => {
 			const child = options.ownership.kind === "task" && !resumes ? { abandonOnRestart: true, ...options } : options;
 			let id: TaskId<R> | undefined;
-			await runtime.commit(async (tx) => {
+			await runtime.commitRun(async (tx) => {
 				id = await tx.createTask(task, input, child);
 				return undefined;
 			}, taskContext);
@@ -466,7 +466,7 @@ function publishProgress(runtime: Runtime, reported: Reported, enabled: boolean,
 			}
 			if (detailsChanged) bytes += utf8ByteLength(JSON.stringify(current.details ?? null));
 			if (added.length > 0) bytes += utf8ByteLength(JSON.stringify(added));
-			await runtime.commit(async (tx) => {
+			await runtime.commitRun(async (tx) => {
 				const slot = toolSlot(await tx.doc(LiveDoc, runtime.conversationId), runtime.taskId);
 				if (slot === undefined) return undefined;
 				// REMINDER: assign `output` as one string field. Chord then diffs it into an append, or a trim plus an
@@ -611,7 +611,8 @@ async function settle(
 	const madeNested = (await runtime.memo(MADE_NESTED_CALLS, context)) === true;
 	// Mark them all before waiting for any: one may run until a sibling is cancelled.
 	await Promise.all(nestedIds.map((id) => runtime.abortOwned(id, context)));
-	await runtime.commit(async (tx) => {
+	// Same writes on either commit. The outcome is chosen by the invocation: abort handlers call `commitAbort`.
+	const record = async (tx: Tx): Promise<ToolTaskResult> => {
 		const conversationId = runtime.conversationId;
 		const live = await tx.doc(LiveDoc, conversationId);
 		const slot = toolSlot(live, runtime.taskId);
@@ -647,12 +648,22 @@ async function settle(
 		// A call that made no nested calls, in any attempt, has no slots below it; skipping the scan keeps many leaves
 		// linear. Committed before the read: no nested call is admitted after `ended`.
 		if (madeNested) removeNestedSlots(live, runtime.taskId);
-		if (ending.status === "aborted") return { status: "terminal", outcome: { status: "aborted", result: settled } };
+		return settled;
+	};
+	if (ending.status === "aborted") {
+		await runtime.commitAbort(async (tx) => {
+			const result = await record(tx);
+			return { status: "terminal", outcome: { status: "aborted", result } };
+		}, context);
+		return;
+	}
+	await runtime.commitRun(async (tx) => {
+		const result = await record(tx);
 		if (ending.status === "failed") {
 			const error = { message: ending.message };
-			return { status: "terminal", outcome: { status: "failed", error, result: settled } };
+			return { status: "terminal", outcome: { status: "failed", error, result } };
 		}
-		return { status: "terminal", outcome: { status: "completed", result: settled } };
+		return { status: "terminal", outcome: { status: "completed", result } };
 	}, context);
 }
 
@@ -699,7 +710,7 @@ async function startNestedCall(
 		arguments: copyJson(args, { omitUndefinedProperties: true }) as JsonObject,
 	};
 	let id: TaskId<ToolTaskResult> | undefined;
-	await runtime.commit(async (tx) => {
+	await runtime.commitRun(async (tx) => {
 		// Opened, or created empty for a key not made yet.
 		const state = await tx.doc(NestedCallDoc, runtime.taskId, key, null);
 		const existing = state.taskId;
