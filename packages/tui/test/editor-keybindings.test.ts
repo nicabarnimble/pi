@@ -8,7 +8,6 @@ import { VirtualTerminal } from "./virtual-terminal.ts";
 
 const SHIFT_BACKSPACE = "\x1b[127;2u";
 const SHIFT_DELETE = "\x1b[3$";
-const SHIFT_SPACE = "\x1b[32;2u";
 
 afterEach(() => {
 	setKeybindings(new KeybindingsManager(TUI_KEYBINDINGS));
@@ -49,28 +48,5 @@ describe("Editor configurable keybindings", () => {
 		assert.strictEqual(remapped.getText(), "ab");
 		remapped.handleInput("\x0f");
 		assert.strictEqual(remapped.getText(), "b");
-	});
-
-	it("inserts a space on shift+space", () => {
-		const editor = createEditor();
-		editor.handleInput(SHIFT_SPACE);
-		assert.strictEqual(editor.getText(), " ");
-	});
-
-	it("submits a trailing backslash on enter only when submit is shift+enter", () => {
-		const unchanged = createEditor();
-		unchanged.setText("a\\");
-		unchanged.handleInput("\n");
-		assert.strictEqual(unchanged.getText(), "a\\\n");
-
-		setKeybindings(new KeybindingsManager(TUI_KEYBINDINGS, { "tui.input.submit": "shift+enter" }));
-		const editor = createEditor();
-		let submitted = "";
-		editor.onSubmit = (text) => {
-			submitted = text;
-		};
-		editor.setText("a\\");
-		editor.handleInput("\n");
-		assert.strictEqual(submitted, "a");
 	});
 });

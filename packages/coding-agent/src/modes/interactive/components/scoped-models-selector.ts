@@ -5,7 +5,8 @@ import {
 	fuzzyFilter,
 	getKeybindings,
 	Input,
-	parseKey,
+	Key,
+	matchesKey,
 	Spacer,
 	Text,
 } from "@earendil-works/pi-tui";
@@ -372,8 +373,8 @@ export class ScopedModelsSelectorComponent extends Container implements Focusabl
 			return;
 		}
 
-		// Ctrl+C clears the query, or cancels when it is already empty.
-		if (parseKey(data) === "ctrl+c") {
+		// Ctrl+C - clear search or cancel if empty
+		if (matchesKey(data, Key.ctrl("c"))) {
 			if (this.searchInput.getValue()) {
 				this.searchInput.setValue("");
 				this.refresh();

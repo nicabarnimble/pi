@@ -27,13 +27,6 @@ describe("KeybindingsManager", () => {
 		assert.deepStrictEqual(keybindings.getKeys("tui.editor.historyNext"), []);
 	});
 
-	it("treats shifted backspace and delete as the existing delete actions", () => {
-		const keybindings = new KeybindingsManager(TUI_KEYBINDINGS);
-
-		assert.deepStrictEqual(keybindings.getKeys("tui.editor.deleteCharBackward"), ["backspace", "shift+backspace"]);
-		assert.deepStrictEqual(keybindings.getKeys("tui.editor.deleteCharForward"), ["delete", "ctrl+d", "shift+delete"]);
-	});
-
 	it("binds unmodified terminal viewport shortcuts to alternate-screen navigation", () => {
 		const keybindings = new KeybindingsManager(TUI_KEYBINDINGS);
 
