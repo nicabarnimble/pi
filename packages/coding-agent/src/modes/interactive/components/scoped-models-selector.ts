@@ -1,5 +1,14 @@
 import type { Model } from "@earendil-works/pi-ai";
-import { Container, type Focusable, fuzzyFilter, getKeybindings, Input, Spacer, Text } from "@earendil-works/pi-tui";
+import {
+	Container,
+	type Focusable,
+	fuzzyFilter,
+	getKeybindings,
+	Input,
+	parseKey,
+	Spacer,
+	Text,
+} from "@earendil-works/pi-tui";
 import { getModelSearchText } from "../model-search.ts";
 import { theme } from "../theme/theme.ts";
 import { DynamicBorder } from "./dynamic-border.ts";
@@ -363,8 +372,8 @@ export class ScopedModelsSelectorComponent extends Container implements Focusabl
 			return;
 		}
 
-		// Clear search, or cancel when the search is already empty.
-		if (kb.matches(data, "app.models.clearSearch")) {
+		// Ctrl+C clears the query, or cancels when it is already empty.
+		if (parseKey(data) === "ctrl+c") {
 			if (this.searchInput.getValue()) {
 				this.searchInput.setValue("");
 				this.refresh();

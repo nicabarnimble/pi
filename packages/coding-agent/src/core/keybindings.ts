@@ -140,14 +140,6 @@ const APP_KEYBINDINGS = {
 		defaultKeys: "alt+down",
 		description: "Move model down in order",
 	},
-	"app.models.clearSearch": {
-		defaultKeys: "ctrl+c",
-		description: "Clear model search or cancel",
-	},
-	"app.config.exit": {
-		defaultKeys: "ctrl+c",
-		description: "Exit config selector",
-	},
 	"app.tree.filter.default": {
 		defaultKeys: "ctrl+d",
 		description: "Tree filter: default view",

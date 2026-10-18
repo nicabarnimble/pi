@@ -51,18 +51,13 @@ describe("Editor configurable keybindings", () => {
 		assert.strictEqual(remapped.getText(), "b");
 	});
 
-	it("inserts a space on shift+space and follows a remap", () => {
+	it("inserts a space on shift+space", () => {
 		const editor = createEditor();
 		editor.handleInput(SHIFT_SPACE);
 		assert.strictEqual(editor.getText(), " ");
-
-		setKeybindings(new KeybindingsManager(TUI_KEYBINDINGS, { "tui.editor.insertSpace": "ctrl+t" }));
-		const remapped = createEditor();
-		remapped.handleInput("\x14");
-		assert.strictEqual(remapped.getText(), " ");
 	});
 
-	it("submits a trailing backslash on enter only when submit is shift+enter, and follows a remap", () => {
+	it("submits a trailing backslash on enter only when submit is shift+enter", () => {
 		const unchanged = createEditor();
 		unchanged.setText("a\\");
 		unchanged.handleInput("\n");
@@ -77,25 +72,5 @@ describe("Editor configurable keybindings", () => {
 		editor.setText("a\\");
 		editor.handleInput("\n");
 		assert.strictEqual(submitted, "a");
-
-		setKeybindings(
-			new KeybindingsManager(TUI_KEYBINDINGS, {
-				"tui.input.submit": "shift+enter",
-				"tui.input.enter": "ctrl+t",
-				"tui.input.newLine": "ctrl+t",
-			}),
-		);
-		const remapped = createEditor();
-		let remappedSubmitted = "";
-		remapped.onSubmit = (text) => {
-			remappedSubmitted = text;
-		};
-		remapped.setText("a\\");
-		remapped.handleInput("\n");
-		assert.strictEqual(remappedSubmitted, "");
-		assert.strictEqual(remapped.getText(), "a\\\n");
-		remapped.setText("a\\");
-		remapped.handleInput("\x14");
-		assert.strictEqual(remappedSubmitted, "a");
 	});
 });

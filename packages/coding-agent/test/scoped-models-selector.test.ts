@@ -143,27 +143,20 @@ describe("scoped models selector", () => {
 		expect(cancelled).toBe(2);
 	});
 
-	it("follows remaps of model search clear and cancel", async () => {
+	it("follows a remap of cancel and still clears search on ctrl+c", async () => {
 		let cancelled = 0;
 		const selector = await createSelector([{ id: "model-a", name: "Model A", enabled: true }], () => {
 			cancelled++;
 		});
+		setKeybindings(new KeybindingsManager({ "tui.select.cancel": "ctrl+g" }));
 
-		setKeybindings(new KeybindingsManager({ "app.models.clearSearch": "ctrl+q" }));
 		selector.handleInput("a");
-		selector.handleInput("\x11");
+		selector.handleInput("\x1b");
+		expect(cancelled).toBe(0);
+		selector.handleInput("\x03");
 		expect(selector.getSearchInput().getValue()).toBe("");
 		expect(cancelled).toBe(0);
-
-		selector.handleInput("a");
-		selector.handleInput("\x03");
-		expect(selector.getSearchInput().getValue()).toBe("a");
-		expect(cancelled).toBe(1);
-
-		setKeybindings(new KeybindingsManager({ "tui.select.cancel": "ctrl+g" }));
-		selector.handleInput("\x1b");
-		expect(cancelled).toBe(1);
 		selector.handleInput("\x07");
-		expect(cancelled).toBe(2);
+		expect(cancelled).toBe(1);
 	});
 });

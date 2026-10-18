@@ -48,11 +48,5 @@ describe("config selector keybindings", () => {
 		list.handleInput("\x03");
 		expect(closed).toBe(2);
 		expect(exited).toBe(1);
-
-		setKeybindings(new KeybindingsManager({ "app.config.exit": "ctrl+q" }));
-		list.handleInput("\x03");
-		list.handleInput("\x11");
-		expect(closed).toBe(3);
-		expect(exited).toBe(2);
 	});
 });

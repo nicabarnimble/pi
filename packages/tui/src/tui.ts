@@ -3,8 +3,7 @@
  */
 
 import { performance } from "node:perf_hooks";
-import { getKeybindings } from "./keybindings.ts";
-import { isKeyRelease } from "./keys.ts";
+import { isKeyRelease, parseKey } from "./keys.ts";
 import type { Terminal } from "./terminal.ts";
 import {
 	parseOscColorResponse,
@@ -1083,8 +1082,8 @@ export abstract class TuiBase extends Container implements TUI {
 			return;
 		}
 
-		// Global debug key. Consume it only when a handler is registered.
-		if (this.onDebug && getKeybindings().matches(data, "tui.debug")) {
+		// Fixed debug chord. Consumed only when a handler is registered.
+		if (this.onDebug && parseKey(data) === "shift+ctrl+d") {
 			this.onDebug();
 			return;
 		}

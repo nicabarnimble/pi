@@ -99,10 +99,6 @@
       "$ref": "#/$defs/KeybindingValue",
       "description": "Undo"
     },
-    "tui.editor.insertSpace": {
-      "$ref": "#/$defs/KeybindingValue",
-      "description": "Insert space"
-    },
     "tui.input.newLine": {
       "$ref": "#/$defs/KeybindingValue",
       "description": "Insert newline"
@@ -111,10 +107,6 @@
       "$ref": "#/$defs/KeybindingValue",
       "description": "Submit input"
     },
-    "tui.input.enter": {
-      "$ref": "#/$defs/KeybindingValue",
-      "description": "Unmodified Enter"
-    },
     "tui.input.tab": {
       "$ref": "#/$defs/KeybindingValue",
       "description": "Tab / autocomplete"
@@ -122,10 +114,6 @@
     "tui.input.copy": {
       "$ref": "#/$defs/KeybindingValue",
       "description": "Copy selection"
-    },
-    "tui.debug": {
-      "$ref": "#/$defs/KeybindingValue",
-      "description": "Trigger debug handler"
     },
     "tui.select.up": {
       "$ref": "#/$defs/KeybindingValue",
@@ -350,14 +338,6 @@
     "app.models.reorderDown": {
       "$ref": "#/$defs/KeybindingValue",
       "description": "Move model down in order"
-    },
-    "app.models.clearSearch": {
-      "$ref": "#/$defs/KeybindingValue",
-      "description": "Clear model search or cancel"
-    },
-    "app.config.exit": {
-      "$ref": "#/$defs/KeybindingValue",
-      "description": "Exit config selector"
     },
     "app.tree.filter.default": {
       "$ref": "#/$defs/KeybindingValue",

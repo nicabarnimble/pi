@@ -10,6 +10,7 @@ import {
 	type Focusable,
 	getKeybindings,
 	Input,
+	parseKey,
 	Spacer,
 	truncateToWidth,
 	visibleWidth,
@@ -493,7 +494,8 @@ class ResourceList implements Component, Focusable {
 			this.onCancel?.();
 			return;
 		}
-		if (kb.matches(data, "app.config.exit")) {
+		// Ctrl+C still exits when cancel no longer claims it.
+		if (parseKey(data) === "ctrl+c") {
 			this.onExit?.();
 			return;
 		}
