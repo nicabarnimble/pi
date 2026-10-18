@@ -384,8 +384,7 @@ export class ScopedModelsSelectorComponent extends Container implements Focusabl
 			return;
 		}
 
-		// Escape - cancel
-		if (matchesKey(data, Key.escape)) {
+		if (kb.matches(data, "tui.select.cancel")) {
 			this.callbacks.onCancel();
 			return;
 		}
